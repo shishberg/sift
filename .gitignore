@@ -5,3 +5,7 @@ dist/
 coverage/
 web/node_modules/
 web/dist/
+
+# test artifacts
+.playwright-mcp/
+*.jpeg
