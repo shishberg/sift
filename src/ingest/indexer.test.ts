@@ -350,4 +350,66 @@ describe('EmbedWorker', () => {
     expect(store.queueStats().pending).toBe(0);
     expect(store.queueStats().embedded).toBe(2);
   });
+
+  it('lastError is undefined before any run', () => {
+    const worker = new EmbedWorker(store, makeEmbedder(), { backoffMs: 0 });
+    expect(worker.lastError).toBeUndefined();
+  });
+
+  it('lastError is set to the embed error after a failing run', async () => {
+    await seedPending(1);
+    const errorMessage = 'ollama connection refused: ECONNREFUSED';
+    const failEmbedder: Embedder = {
+      model: 'test',
+      dims: EMBED_DIMS,
+      embed: async () => { throw new Error(errorMessage); },
+    };
+    const worker = new EmbedWorker(store, failEmbedder, { backoffMs: 0 });
+    worker.kick();
+    await worker.awaitIdle();
+
+    expect(worker.lastError).toBeInstanceOf(Error);
+    expect(worker.lastError!.message).toBe(errorMessage);
+    // Worker is no longer running; pending rows remain.
+    expect(worker.isRunning).toBe(false);
+    expect(store.queueStats().pending).toBe(1);
+  });
+
+  it('lastError is cleared (stays undefined) after a successful run', async () => {
+    // No pending work → drain immediately, no error
+    const worker = new EmbedWorker(store, makeEmbedder(), { backoffMs: 0 });
+    worker.kick();
+    await worker.awaitIdle();
+    expect(worker.lastError).toBeUndefined();
+  });
+
+  it('lastError is cleared after a subsequent successful kick following an earlier failure', async () => {
+    await seedPending(1);
+
+    let failNext = true;
+    const conditionalEmbedder: Embedder = {
+      model: 'test',
+      dims: EMBED_DIMS,
+      async embed(texts: string[]): Promise<number[][]> {
+        if (failNext) {
+          failNext = false;
+          throw new Error('first attempt fails');
+        }
+        return texts.map(() => Array(EMBED_DIMS).fill(0.1));
+      },
+    };
+
+    const worker = new EmbedWorker(store, conditionalEmbedder, { backoffMs: 0 });
+
+    // First kick: fails
+    worker.kick();
+    await worker.awaitIdle();
+    expect(worker.lastError).toBeInstanceOf(Error);
+
+    // Second kick: succeeds
+    worker.kick();
+    await worker.awaitIdle();
+    expect(worker.lastError).toBeUndefined();
+    expect(store.queueStats().pending).toBe(0);
+  });
 });

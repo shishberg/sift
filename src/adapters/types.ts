@@ -1,4 +1,4 @@
-import type { Chunk } from '../types.js';
+import type { Chunk, JsonlAgentType } from '../types.js';
 
 export interface ParseCtx {
   filePath: string;
@@ -6,7 +6,7 @@ export interface ParseCtx {
 }
 
 export interface Adapter {
-  agentType: 'claude' | 'codex' | 'pi';
+  agentType: JsonlAgentType;
   /** Absolute dir this adapter owns (expanded ~). */
   rootDir: string;
   /** True if this file path belongs to this agent. */

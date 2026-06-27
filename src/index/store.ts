@@ -3,14 +3,14 @@ import * as sqliteVec from 'sqlite-vec';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
-import type { Chunk } from '../types.js';
+import type { Chunk, JsonlAgentType } from '../types.js';
 
 /** Embedding dimension for nomic-embed-text. One place to change if the model changes. */
 export const EMBED_DIMS = 768;
 
 export interface SourceFile {
   path: string;
-  agentType: 'claude' | 'codex' | 'pi';
+  agentType: JsonlAgentType;
   inode?: number;
   lastOffset: number;
   lastSize: number;
@@ -51,6 +51,9 @@ interface SourceFileRow {
 // ----- Store -----
 
 export class Store {
+  /** The resolved path this store was opened with (`:memory:` for in-process tests). */
+  readonly dbPath: string;
+
   private readonly db: Database.Database;
 
   // Prepared statements — created once after schema is ready.
@@ -83,6 +86,8 @@ export class Store {
   constructor(dbPath?: string) {
     const resolved =
       dbPath ?? process.env.AGENT_SEARCH_DB ?? join(homedir(), '.agent-search', 'index.db');
+
+    this.dbPath = resolved;
 
     if (resolved !== ':memory:') {
       mkdirSync(dirname(resolved), { recursive: true });
@@ -367,7 +372,7 @@ export class Store {
     if (!row) return undefined;
     return {
       path: row.path,
-      agentType: row.agent_type as SourceFile['agentType'],
+      agentType: row.agent_type as JsonlAgentType,
       inode: row.inode ?? undefined,
       lastOffset: row.last_offset,
       lastSize: row.last_size,

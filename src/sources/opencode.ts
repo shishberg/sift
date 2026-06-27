@@ -158,7 +158,13 @@ export class OpenCodeSource {
       const sessionId = part.session_id;
       const filePath = `opencode://${sessionId}`;
       const lineNumber = part.rowid;
-      const timestamp = new Date(part.time_created).toISOString();
+      let timestamp: string;
+      try {
+        timestamp = new Date(part.time_created).toISOString();
+      } catch {
+        // out-of-range or invalid time_created — fall back to empty string
+        timestamp = '';
+      }
       // Default to 'assistant' if the message role is unknown (defensive).
       const role = roleByMessageId.get(part.message_id) ?? 'assistant';
 

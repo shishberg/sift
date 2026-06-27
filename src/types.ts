@@ -1,7 +1,16 @@
+/** All agent types that can appear in the index (includes opencode which uses a DB source). */
+export type AgentType = 'claude' | 'codex' | 'pi' | 'opencode';
+
+/**
+ * Agent types that are backed by JSONL log files and go through the Adapter interface.
+ * opencode is excluded — it uses a SQLite source (OpenCodeSource), not an Adapter.
+ */
+export type JsonlAgentType = 'claude' | 'codex' | 'pi';
+
 export type Role = 'user' | 'assistant' | 'tool';
 
 export interface Chunk {
-  agentType: 'claude' | 'codex' | 'pi' | 'opencode';
+  agentType: AgentType;
   sessionId: string;
   filePath: string;
   lineNumber: number; // 1-based line in the file

@@ -1,7 +1,10 @@
+/** All agent types that can appear in the index. Mirrors src/types.ts AgentType. */
+export type AgentType = 'claude' | 'codex' | 'pi' | 'opencode';
+
 /** Mirror of the backend SearchResult shape. */
 export interface SearchResult {
   sessionId: string;
-  agentType: 'claude' | 'codex' | 'pi' | 'opencode';
+  agentType: AgentType;
   filePath: string;
   lineNumber: number;
   role: 'user' | 'assistant' | 'tool';
@@ -12,7 +15,7 @@ export interface SearchResult {
 
 /** Mirror of the backend Chunk shape. */
 export interface Chunk {
-  agentType: 'claude' | 'codex' | 'pi' | 'opencode';
+  agentType: AgentType;
   sessionId: string;
   filePath: string;
   lineNumber: number;

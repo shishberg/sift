@@ -12,6 +12,7 @@ import { realpathSync, existsSync } from 'node:fs';
 import { basename } from 'node:path';
 import { Store } from '../index/store.js';
 import { OllamaEmbedder } from '../embed/ollama.js';
+import { assertEmbedModel } from '../embed/guard.js';
 import { buildRegistry } from '../adapters/registry.js';
 import { EmbedWorker } from '../ingest/indexer.js';
 import { Watcher } from '../ingest/watcher.js';
@@ -243,6 +244,133 @@ export function cmdStatus(
 }
 
 // ---------------------------------------------------------------------------
+// Command: index (one-shot, exported for unit tests)
+// ---------------------------------------------------------------------------
+
+export interface CmdIndexDeps {
+  /** Returns current embedding queue stats. */
+  queueStats: () => { total: number; embedded: number; pending: number };
+  /** Start the embed worker drain pass. */
+  kickWorker: () => void;
+  /** Whether the embed worker drain pass is currently running. */
+  isWorkerRunning: () => boolean;
+  /** The most recent embed error, if the worker stopped due to a failure. */
+  workerLastError: () => Error | undefined;
+  /** Resolves when the worker becomes idle. */
+  awaitWorkerIdle: () => Promise<void>;
+  /** Start the file watcher. */
+  startWatcher: () => void;
+  /** Resolves when the initial backfill scan has finished enqueueing rows. */
+  awaitBackfillEnqueued: () => Promise<void>;
+  /** Stop the file watcher. */
+  stopWatcher: () => Promise<void>;
+  /** Pull new opencode sessions. */
+  importOpencode: (write: (s: string) => void) => Promise<void>;
+  /**
+   * Assert that the embed model stored in the index matches the current embedder.
+   * Throws an Error with a human-readable message on mismatch.
+   */
+  assertEmbedModel: () => void;
+}
+
+export interface CmdIndexOpts {
+  isTTY: boolean;
+  write: (s: string) => void;
+  writeRaw: (s: string) => void;
+  intervalMs?: number;
+}
+
+export interface CmdIndexResult {
+  ok: boolean;
+  /** Human-readable error message. Defined only when ok === false. */
+  error?: string;
+}
+
+/**
+ * One-shot index command: scan all JSONL + opencode files, drain the embed queue
+ * to completion (or report a clear error if the embedder is unreachable), then exit.
+ *
+ * Designed for dependency injection so it can be unit-tested without real ollama
+ * or real file I/O.
+ */
+export async function cmdIndex(deps: CmdIndexDeps, opts: CmdIndexOpts): Promise<CmdIndexResult> {
+  const {
+    queueStats,
+    kickWorker,
+    isWorkerRunning,
+    workerLastError,
+    awaitWorkerIdle,
+    startWatcher,
+    awaitBackfillEnqueued,
+    stopWatcher,
+    importOpencode,
+    assertEmbedModel: assertModel,
+  } = deps;
+  const { isTTY, write, writeRaw, intervalMs = 500 } = opts;
+
+  // Assert embed model BEFORE starting the worker — gives a clear error
+  // if the index was built with a different model.
+  try {
+    assertModel();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+
+  await importOpencode(write);
+  write('Scanning agent log directories…');
+  startWatcher();
+  await awaitBackfillEnqueued();
+  write('Backfill scan complete. Draining embedding queue…');
+  kickWorker();
+
+  // Progress loop with stuck-worker detection.
+  // Exits when pending reaches 0 (done) or the worker has stopped with pending > 0 (error).
+  let lastBar = '';
+  while (true) {
+    const stats = queueStats();
+    const bar = renderProgressBar(stats);
+
+    if (isTTY) {
+      writeRaw(`\r${bar}`);
+    } else if (bar !== lastBar) {
+      write(bar);
+      lastBar = bar;
+    }
+
+    if (stats.pending === 0) {
+      if (isTTY) writeRaw('\n');
+      break;
+    }
+
+    // Detect: worker stopped (not running, no rerun scheduled) while work remains.
+    // This means the embedder is persistently failing — abort with a clear message.
+    if (!isWorkerRunning() && stats.pending > 0) {
+      if (isTTY) writeRaw('\n');
+      const err = workerLastError();
+      const detail = err?.message ?? 'embed worker stopped unexpectedly';
+      // Stop the watcher before returning so we don't leak handles.
+      await stopWatcher();
+      return {
+        ok: false,
+        error:
+          `Embedding failed: ${detail}\n` +
+          `Is ollama running? Start it with: ollama serve`,
+      };
+    }
+
+    await new Promise<void>((r) => setTimeout(r, intervalMs));
+  }
+
+  await awaitWorkerIdle();
+  await stopWatcher();
+
+  const finalStats = queueStats();
+  write(`Done. ${finalStats.embedded}/${finalStats.total} chunks embedded.`);
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
 // Arg parsing
 // ---------------------------------------------------------------------------
 
@@ -426,6 +554,17 @@ async function main(): Promise<void> {
     const store = new Store();
     const embedder = new OllamaEmbedder();
 
+    // Guard: if the index was built with a different model, the query embeddings
+    // would be in a different space than the stored vectors — results would be garbage.
+    try {
+      assertEmbedModel(store, embedder, store.dbPath);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(msg);
+      store.close();
+      process.exit(1);
+    }
+
     try {
       await cmdSearch(
         parsed.query,
@@ -491,32 +630,32 @@ async function main(): Promise<void> {
 
     const isTTY = process.stdout.isTTY ?? false;
 
-    // Pull opencode sessions before the JSONL scan so the embed queue drains
-    // them together with JSONL chunks in the same progress pass.
-    await importOpencode(store, (s) => console.log(s));
+    const result = await cmdIndex(
+      {
+        queueStats: () => store.queueStats(),
+        kickWorker: () => embedWorker.kick(),
+        isWorkerRunning: () => embedWorker.isRunning,
+        workerLastError: () => embedWorker.lastError,
+        awaitWorkerIdle: () => embedWorker.awaitIdle(),
+        startWatcher: () => watcher.start(),
+        awaitBackfillEnqueued: () => watcher.awaitBackfillEnqueued(),
+        stopWatcher: () => watcher.stop(),
+        importOpencode: (write) => importOpencode(store, write),
+        assertEmbedModel: () => assertEmbedModel(store, embedder, store.dbPath),
+      },
+      {
+        isTTY,
+        write: (s) => console.log(s),
+        writeRaw: (s) => process.stdout.write(s),
+      },
+    );
 
-    console.log('Scanning agent log directories…');
-    watcher.start();
-
-    await watcher.awaitBackfillEnqueued();
-    console.log('Backfill scan complete. Draining embedding queue…');
-    embedWorker.kick();
-
-    await progressLoop({
-      queueStats: () => store.queueStats(),
-      shouldStop: () => false,
-      isTTY,
-      write: (s) => console.log(s),
-      writeRaw: (s) => process.stdout.write(s),
-    });
-
-    await embedWorker.awaitIdle();
-    await watcher.stop();
-
-    const stats = store.queueStats();
     store.close();
 
-    console.log(`Done. ${stats.embedded}/${stats.total} chunks embedded.`);
+    if (!result.ok) {
+      console.error(result.error);
+      process.exit(1);
+    }
     return;
   }
 
@@ -529,6 +668,17 @@ async function main(): Promise<void> {
 
     const store = new Store();
     const embedder = new OllamaEmbedder();
+
+    // Guard: the embed model must match the index (needed for both search queries
+    // and, with --watch, for new embeddings).
+    try {
+      assertEmbedModel(store, embedder, store.dbPath);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(msg);
+      store.close();
+      process.exit(1);
+    }
 
     let watcher: Watcher | undefined;
     let embedWorker: EmbedWorker | undefined;
@@ -600,6 +750,17 @@ async function main(): Promise<void> {
         process.exit(0);
       });
     });
+
+    // Guard embed model before starting. watch retries on each kick, so a model
+    // mismatch here is a fatal startup error.
+    try {
+      assertEmbedModel(store, embedder, store.dbPath);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(msg);
+      store.close();
+      process.exit(1);
+    }
 
     // One-shot opencode pull at startup. Future: poll DB file mtime for live updates.
     await importOpencode(store, (s) => console.log(s));

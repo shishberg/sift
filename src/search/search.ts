@@ -1,6 +1,6 @@
 import type { Store } from '../index/store.js';
 import type { Embedder } from '../embed/types.js';
-import type { Chunk } from '../types.js';
+import type { Chunk, AgentType } from '../types.js';
 
 // ---------------------------------------------------------------------------
 // Result shape
@@ -8,7 +8,7 @@ import type { Chunk } from '../types.js';
 
 export interface SearchResult {
   sessionId: string;
-  agentType: 'claude' | 'codex' | 'pi' | 'opencode';
+  agentType: AgentType;
   filePath: string;
   lineNumber: number;
   role: 'user' | 'assistant' | 'tool';

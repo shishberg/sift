@@ -331,4 +331,37 @@ describe('OpenCodeSource', () => {
     expect(chunks).toHaveLength(1);
     expect(chunks[0]!.text).toBe('real content');
   });
+
+  it('handles an out-of-range time_created without throwing, falls back to empty timestamp, and advances the cursor', () => {
+    // Number.MAX_SAFE_INTEGER + 1 is beyond the Date range → new Date(x).toISOString() throws
+    // SQLite's flexible typing lets us insert this as an INTEGER column value.
+    const badTime = 8640000000000001; // 1 ms beyond Date max
+
+    insertMessage(fixtureDb, { id: 'msg_bad_ts', sessionId: 'ses_bad_ts', role: 'user' });
+    insertPart(fixtureDb, {
+      id: 'prt_bad_ts',
+      messageId: 'msg_bad_ts',
+      sessionId: 'ses_bad_ts',
+      timeCreated: badTime,
+      data: { type: 'text', text: 'content with bad timestamp' },
+    });
+
+    const source = new OpenCodeSource(fixtureDb);
+    let count = -1;
+    expect(() => {
+      count = source.index(store);
+    }).not.toThrow();
+
+    // A chunk should still be produced.
+    expect(count).toBe(1);
+    const chunks = store.getSessionChunks('ses_bad_ts');
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]!.text).toBe('content with bad timestamp');
+    // Timestamp must be a string (empty or epoch fallback — either is fine).
+    expect(typeof chunks[0]!.timestamp).toBe('string');
+
+    // Cursor must have advanced so re-run produces 0.
+    const count2 = source.index(store);
+    expect(count2).toBe(0);
+  });
 });

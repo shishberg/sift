@@ -5,6 +5,7 @@ import {
   cmdSearch,
   cmdShow,
   cmdStatus,
+  cmdIndex,
   HELP_TEXT,
   parseCli,
 } from './cli.js';
@@ -485,5 +486,106 @@ describe('parseCli', () => {
   it('returns help command for empty argv', () => {
     const args = parseCli([]);
     expect(args.command).toBe('help');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cmdIndex
+// ---------------------------------------------------------------------------
+
+/** Build a minimal fake CmdIndexDeps for unit tests. */
+function makeFakeIndexDeps(overrides: Partial<Parameters<typeof cmdIndex>[0]> = {}): Parameters<typeof cmdIndex>[0] {
+  return {
+    queueStats: () => ({ total: 0, embedded: 0, pending: 0 }),
+    kickWorker: () => {},
+    isWorkerRunning: () => false,
+    workerLastError: () => undefined,
+    awaitWorkerIdle: () => Promise.resolve(),
+    startWatcher: () => {},
+    awaitBackfillEnqueued: () => Promise.resolve(),
+    stopWatcher: () => Promise.resolve(),
+    importOpencode: () => Promise.resolve(),
+    assertEmbedModel: () => {}, // no-op by default
+    ...overrides,
+  };
+}
+
+const SILENT_OPTS: Parameters<typeof cmdIndex>[1] = {
+  isTTY: false,
+  write: () => {},
+  writeRaw: () => {},
+  intervalMs: 0,
+};
+
+describe('cmdIndex', () => {
+  it('returns ok=true when queue drains to zero', async () => {
+    const result = await cmdIndex(makeFakeIndexDeps(), SILENT_OPTS);
+    expect(result.ok).toBe(true);
+  });
+
+  it('calls kickWorker after backfill is enqueued', async () => {
+    let kicked = false;
+    await cmdIndex(
+      makeFakeIndexDeps({ kickWorker: () => { kicked = true; } }),
+      SILENT_OPTS,
+    );
+    expect(kicked).toBe(true);
+  });
+
+  it('returns ok=false with an error message when the embed worker dies with pending work', async () => {
+    // Worker is not running, has an error, but pending > 0.
+    const result = await cmdIndex(
+      makeFakeIndexDeps({
+        queueStats: () => ({ total: 5, embedded: 0, pending: 5 }),
+        isWorkerRunning: () => false,
+        workerLastError: () => new Error('cannot reach ollama at localhost:11434'),
+      }),
+      SILENT_OPTS,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/ollama/i);
+  });
+
+  it('does not hang when worker dies with pending work (terminates promptly)', async () => {
+    // This test would time out if the loop were infinite.
+    const start = Date.now();
+    await cmdIndex(
+      makeFakeIndexDeps({
+        queueStats: () => ({ total: 3, embedded: 0, pending: 3 }),
+        isWorkerRunning: () => false,
+        workerLastError: () => new Error('ollama unreachable'),
+      }),
+      { ...SILENT_OPTS, intervalMs: 0 },
+    );
+    const elapsed = Date.now() - start;
+    expect(elapsed).toBeLessThan(2000); // should terminate in well under 2s
+  });
+
+  it('calls assertEmbedModel before kicking the worker', async () => {
+    const calls: string[] = [];
+    await cmdIndex(
+      makeFakeIndexDeps({
+        assertEmbedModel: () => { calls.push('assertEmbedModel'); },
+        kickWorker: () => { calls.push('kickWorker'); },
+      }),
+      SILENT_OPTS,
+    );
+    const assertIdx = calls.indexOf('assertEmbedModel');
+    const kickIdx = calls.indexOf('kickWorker');
+    expect(assertIdx).toBeGreaterThanOrEqual(0);
+    expect(kickIdx).toBeGreaterThan(assertIdx);
+  });
+
+  it('returns ok=false with clear error when assertEmbedModel throws (model mismatch)', async () => {
+    const result = await cmdIndex(
+      makeFakeIndexDeps({
+        assertEmbedModel: () => {
+          throw new Error('Embed model mismatch: index was built with "old-model" but current is "new-model". Delete /idx.db to reindex.');
+        },
+      }),
+      SILENT_OPTS,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/mismatch|old-model/i);
   });
 });

@@ -96,6 +96,7 @@ export interface EmbedWorkerOptions {
 export class EmbedWorker {
   private running = false;
   private rerunRequested = false;
+  private _lastError: Error | undefined;
   private readonly idleResolvers: Array<() => void> = [];
   private readonly batchSize: number;
   private readonly backoffMs: number;
@@ -126,6 +127,14 @@ export class EmbedWorker {
   }
 
   /**
+   * The most recent embed error, or undefined if the last pass succeeded
+   * (or no pass has run yet). Updated every time a batch fails.
+   */
+  get lastError(): Error | undefined {
+    return this._lastError;
+  }
+
+  /**
    * Resolves when the worker becomes idle (no pass running and no pass
    * scheduled). Resolves immediately if already idle.
    */
@@ -142,6 +151,7 @@ export class EmbedWorker {
     try {
       do {
         this.rerunRequested = false;
+        this._lastError = undefined; // reset at the start of each pass
         let errorOccurred = false;
 
         while (!errorOccurred) {
@@ -155,6 +165,7 @@ export class EmbedWorker {
               this.store.setEmbedding(pending[i]!.id, embeddings[i]!);
             }
           } catch (err) {
+            this._lastError = err instanceof Error ? err : new Error(String(err));
             console.error(
               '[EmbedWorker] embed error — rows stay pending, will retry on next kick:',
               err,
