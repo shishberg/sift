@@ -108,6 +108,37 @@ describe('Store', () => {
       const rows = store.getSessionChunks('test-session-1');
       expect(rows[0].toolCall).toBeUndefined();
     });
+
+    // --- needs_embed gating ---
+    it('sets needs_embed=1 for user chunk with non-empty text', () => {
+      const id = store.addChunk(makeChunk({ role: 'user', text: 'hello' }));
+      const pending = store.takePendingEmbeds(100);
+      expect(pending.some(p => p.id === id)).toBe(true);
+    });
+
+    it('sets needs_embed=1 for assistant chunk with non-empty text', () => {
+      const id = store.addChunk(makeChunk({ role: 'assistant', text: 'a response' }));
+      const pending = store.takePendingEmbeds(100);
+      expect(pending.some(p => p.id === id)).toBe(true);
+    });
+
+    it('sets needs_embed=0 for tool chunk', () => {
+      store.addChunk(makeChunk({ role: 'tool', text: '', toolCall: { name: 'bash', args: '{}' } }));
+      const pending = store.takePendingEmbeds(100);
+      expect(pending).toHaveLength(0);
+    });
+
+    it('sets needs_embed=0 for user chunk with empty text', () => {
+      store.addChunk(makeChunk({ role: 'user', text: '' }));
+      const pending = store.takePendingEmbeds(100);
+      expect(pending).toHaveLength(0);
+    });
+
+    it('sets needs_embed=0 for assistant chunk with empty text', () => {
+      store.addChunk(makeChunk({ role: 'assistant', text: '' }));
+      const pending = store.takePendingEmbeds(100);
+      expect(pending).toHaveLength(0);
+    });
   });
 
   describe('FTS search', () => {
@@ -146,11 +177,10 @@ describe('Store', () => {
     it('vecSearch finds exact-match embedding first with distance 0', () => {
       const emb1 = makeEmbedding(1.0);
       const emb2 = makeEmbedding(0.0);
-      const id1 = store.addChunk(
-        makeChunk({ text: 'vector one', sessionId: 's1', lineNumber: 1 }),
-        emb1,
-      );
-      store.addChunk(makeChunk({ text: 'vector two', sessionId: 's2', lineNumber: 2 }), emb2);
+      const id1 = store.addChunk(makeChunk({ text: 'vector one', sessionId: 's1', lineNumber: 1 }));
+      const id2 = store.addChunk(makeChunk({ text: 'vector two', sessionId: 's2', lineNumber: 2 }));
+      store.setEmbedding(id1, emb1);
+      store.setEmbedding(id2, emb2);
 
       const results = store.vecSearch(emb1, 2);
       expect(results.length).toBeGreaterThan(0);
@@ -162,14 +192,10 @@ describe('Store', () => {
     it('vecSearch ranks closer embedding first', () => {
       const emb1 = makeEmbedding(1.0);
       const emb2 = makeEmbedding(0.0);
-      const id1 = store.addChunk(
-        makeChunk({ text: 'close', sessionId: 's1', lineNumber: 1 }),
-        emb1,
-      );
-      const id2 = store.addChunk(
-        makeChunk({ text: 'far', sessionId: 's2', lineNumber: 2 }),
-        emb2,
-      );
+      const id1 = store.addChunk(makeChunk({ text: 'close', sessionId: 's1', lineNumber: 1 }));
+      const id2 = store.addChunk(makeChunk({ text: 'far', sessionId: 's2', lineNumber: 2 }));
+      store.setEmbedding(id1, emb1);
+      store.setEmbedding(id2, emb2);
 
       // query near emb2 (all zeros) — id2 should come first
       const results = store.vecSearch(emb2, 2);
@@ -187,13 +213,103 @@ describe('Store', () => {
       const emb = makeEmbedding(0.5);
       const idWithEmb = store.addChunk(
         makeChunk({ text: 'has embedding', sessionId: 's1', lineNumber: 1 }),
-        emb,
       );
+      store.setEmbedding(idWithEmb, emb);
       store.addChunk(makeChunk({ text: 'no embedding', sessionId: 's2', lineNumber: 2 }));
 
       const results = store.vecSearch(emb, 10);
       expect(results).toHaveLength(1);
       expect(results[0].id).toBe(idWithEmb);
+    });
+  });
+
+  describe('takePendingEmbeds', () => {
+    it('returns chunks with needs_embed=1 with id and text', () => {
+      const id = store.addChunk(makeChunk({ role: 'user', text: 'pending text' }));
+      const pending = store.takePendingEmbeds(10);
+      expect(pending).toHaveLength(1);
+      expect(pending[0].id).toBe(id);
+      expect(pending[0].text).toBe('pending text');
+    });
+
+    it('respects limit', () => {
+      for (let i = 0; i < 5; i++) {
+        store.addChunk(makeChunk({ text: `text ${i}`, lineNumber: i + 1 }));
+      }
+      const pending = store.takePendingEmbeds(3);
+      expect(pending).toHaveLength(3);
+    });
+
+    it('excludes chunks already embedded', () => {
+      const id1 = store.addChunk(makeChunk({ text: 'embedded', lineNumber: 1 }));
+      store.addChunk(makeChunk({ text: 'pending', lineNumber: 2 }));
+      store.setEmbedding(id1, makeEmbedding(0.1));
+
+      const pending = store.takePendingEmbeds(10);
+      expect(pending).toHaveLength(1);
+      expect(pending[0].text).toBe('pending');
+    });
+
+    it('returns empty when nothing pending', () => {
+      store.addChunk(makeChunk({ role: 'tool', text: '', toolCall: { name: 'x', args: '{}' } }));
+      expect(store.takePendingEmbeds(10)).toHaveLength(0);
+    });
+  });
+
+  describe('setEmbedding', () => {
+    it('writes vec row and clears needs_embed', () => {
+      const id = store.addChunk(makeChunk({ text: 'embed me' }));
+      expect(store.takePendingEmbeds(10)).toHaveLength(1);
+
+      store.setEmbedding(id, makeEmbedding(0.5));
+
+      expect(store.takePendingEmbeds(10)).toHaveLength(0);
+      // vec row should exist — vecSearch finds it
+      const results = store.vecSearch(makeEmbedding(0.5), 10);
+      expect(results).toHaveLength(1);
+      expect(results[0].id).toBe(id);
+    });
+
+    it('throws on wrong dimension count', () => {
+      const id = store.addChunk(makeChunk({ text: 'embed me' }));
+      expect(() => store.setEmbedding(id, Array(3).fill(0.1))).toThrow(/dimension/i);
+    });
+
+    it('leaves needs_embed=1 on wrong dimension (atomic: no partial write)', () => {
+      const id = store.addChunk(makeChunk({ text: 'embed me' }));
+      try { store.setEmbedding(id, Array(3).fill(0.1)); } catch { /* expected */ }
+      // needs_embed should still be 1
+      const pending = store.takePendingEmbeds(10);
+      expect(pending.some(p => p.id === id)).toBe(true);
+    });
+  });
+
+  describe('queueStats', () => {
+    it('returns zeros for empty store', () => {
+      const stats = store.queueStats();
+      expect(stats).toEqual({ total: 0, embedded: 0, pending: 0 });
+    });
+
+    it('counts user/assistant non-empty chunks as total', () => {
+      store.addChunk(makeChunk({ role: 'user', text: 'hello' }));
+      store.addChunk(makeChunk({ role: 'assistant', text: 'reply', lineNumber: 2 }));
+      store.addChunk(makeChunk({ role: 'tool', text: '', toolCall: { name: 'x', args: '{}' }, lineNumber: 3 }));
+      store.addChunk(makeChunk({ role: 'user', text: '', lineNumber: 4 })); // empty text
+      const stats = store.queueStats();
+      expect(stats.total).toBe(2);
+      expect(stats.pending).toBe(2);
+      expect(stats.embedded).toBe(0);
+    });
+
+    it('updates embedded count after setEmbedding', () => {
+      const id1 = store.addChunk(makeChunk({ text: 'first', lineNumber: 1 }));
+      store.addChunk(makeChunk({ text: 'second', lineNumber: 2 }));
+      store.setEmbedding(id1, makeEmbedding(0.1));
+
+      const stats = store.queueStats();
+      expect(stats.total).toBe(2);
+      expect(stats.embedded).toBe(1);
+      expect(stats.pending).toBe(1);
     });
   });
 
@@ -209,6 +325,7 @@ describe('Store', () => {
         inode: 12345,
         lastOffset: 0,
         lastSize: 0,
+        lastLineNumber: 0,
       });
       const sf = store.getSourceFile('/test/file.jsonl');
       expect(sf).toBeDefined();
@@ -219,8 +336,8 @@ describe('Store', () => {
 
     it('upsertSourceFile updates existing record', () => {
       const path = '/test/file.jsonl';
-      store.upsertSourceFile({ path, agentType: 'claude', inode: 1, lastOffset: 0, lastSize: 0 });
-      store.upsertSourceFile({ path, agentType: 'claude', inode: 1, lastOffset: 500, lastSize: 1000 });
+      store.upsertSourceFile({ path, agentType: 'claude', inode: 1, lastOffset: 0, lastSize: 0, lastLineNumber: 0 });
+      store.upsertSourceFile({ path, agentType: 'claude', inode: 1, lastOffset: 500, lastSize: 1000, lastLineNumber: 20 });
       const sf = store.getSourceFile(path);
       expect(sf!.lastOffset).toBe(500);
       expect(sf!.lastSize).toBe(1000);
@@ -232,9 +349,37 @@ describe('Store', () => {
         agentType: 'pi',
         lastOffset: 100,
         lastSize: 200,
+        lastLineNumber: 5,
       });
       const sf = store.getSourceFile('/test/no-inode.jsonl');
       expect(sf!.inode).toBeUndefined();
+    });
+
+    it('round-trips lastLineNumber', () => {
+      store.upsertSourceFile({
+        path: '/test/lln.jsonl',
+        agentType: 'claude',
+        inode: 999,
+        lastOffset: 0,
+        lastSize: 0,
+        lastLineNumber: 42,
+      });
+      const sf = store.getSourceFile('/test/lln.jsonl');
+      expect(sf!.lastLineNumber).toBe(42);
+    });
+
+    it('lastLineNumber defaults to 0 when not set', () => {
+      // Insert via raw SQL to simulate a legacy row without the column value
+      // (In practice, the migration adds DEFAULT 0, so this just tests the default)
+      store.upsertSourceFile({
+        path: '/test/legacy.jsonl',
+        agentType: 'codex',
+        lastOffset: 0,
+        lastSize: 0,
+        lastLineNumber: 0,
+      });
+      const sf = store.getSourceFile('/test/legacy.jsonl');
+      expect(sf!.lastLineNumber).toBe(0);
     });
   });
 
@@ -312,54 +457,44 @@ describe('Store', () => {
   });
 
   describe('vec enforcement (spec: only user/assistant with non-empty text get a vec row)', () => {
-    it('does not write vec row for tool chunks even when embedding is provided', () => {
-      // Add a user chunk first so the vec table is non-empty (vecSearch needs at least 1 row)
-      const userEmb = makeEmbedding(1.0);
-      const userId = store.addChunk(
-        makeChunk({ role: 'user', text: 'user text', lineNumber: 1 }),
-        userEmb,
-      );
+    it('does not write vec row for tool chunks', () => {
+      // Add a user chunk so the vec table is non-empty
+      const userId = store.addChunk(makeChunk({ role: 'user', text: 'user text', lineNumber: 1 }));
+      store.setEmbedding(userId, makeEmbedding(1.0));
 
       const toolId = store.addChunk(
-        makeChunk({
-          role: 'tool',
-          text: '',
-          toolCall: { name: 'bash', args: '{}' },
-          lineNumber: 2,
-        }),
-        makeEmbedding(1.0), // embedding provided but should be ignored
+        makeChunk({ role: 'tool', text: '', toolCall: { name: 'bash', args: '{}' }, lineNumber: 2 }),
       );
-
+      // tool chunk never gets needs_embed=1, so setEmbedding is never called for it
+      // confirm it's not in vec table
       const results = store.vecSearch(makeEmbedding(1.0), 10);
       expect(results.map(r => r.id)).toContain(userId);
       expect(results.map(r => r.id)).not.toContain(toolId);
     });
 
     it('does not write vec row for user chunks with empty text', () => {
-      const userEmb = makeEmbedding(1.0);
-      const userId = store.addChunk(
-        makeChunk({ role: 'user', text: 'has text', lineNumber: 1 }),
-        userEmb,
-      );
+      const userId = store.addChunk(makeChunk({ role: 'user', text: 'has text', lineNumber: 1 }));
+      store.setEmbedding(userId, makeEmbedding(1.0));
 
-      const emptyId = store.addChunk(
-        makeChunk({ role: 'user', text: '', lineNumber: 2 }),
-        makeEmbedding(0.9), // embedding provided but should be ignored
-      );
-
+      const emptyId = store.addChunk(makeChunk({ role: 'user', text: '', lineNumber: 2 }));
+      // empty text chunk has needs_embed=0, so setEmbedding is never called for it
       const results = store.vecSearch(makeEmbedding(1.0), 10);
       expect(results.map(r => r.id)).toContain(userId);
       expect(results.map(r => r.id)).not.toContain(emptyId);
     });
   });
 
-  describe('addChunk atomicity', () => {
-    it('throws and does not insert chunk when embedding has wrong dimensions', () => {
-      const chunk = makeChunk({ text: 'must be atomic', sessionId: 'atomic-test' });
-      const wrongDimEmb = Array(3).fill(0.1); // 3 dims, not 768
+  describe('setEmbedding atomicity', () => {
+    it('does not insert vec row when dims are wrong and needs_embed stays 1', () => {
+      const id = store.addChunk(makeChunk({ text: 'must be atomic', sessionId: 'atomic-test' }));
+      const wrongDimEmb = Array(3).fill(0.1);
 
-      expect(() => store.addChunk(chunk, wrongDimEmb)).toThrow();
-      expect(store.getSessionChunks('atomic-test')).toHaveLength(0);
+      expect(() => store.setEmbedding(id, wrongDimEmb)).toThrow();
+      // needs_embed still 1
+      const pending = store.takePendingEmbeds(10);
+      expect(pending.some(p => p.id === id)).toBe(true);
+      // vec table still empty for this id
+      expect(store.vecSearch(Array(EMBED_DIMS).fill(0.1), 10)).toHaveLength(0);
     });
   });
 
@@ -385,13 +520,15 @@ describe('Store', () => {
       expect(store.getSessionChunks('batch-session')).toHaveLength(2);
     });
 
-    it('batch insert with embeddings stores them in vec table', () => {
-      const emb = makeEmbedding(0.5);
-      store.addChunks([
-        { chunk: makeChunk({ sessionId: 'vec-batch', lineNumber: 1 }), embedding: emb },
-      ]);
-      const results = store.vecSearch(emb, 10);
-      expect(results).toHaveLength(1);
+    it('batch insert marks eligible chunks as pending', () => {
+      const chunks = [
+        makeChunk({ text: 'user text', role: 'user', sessionId: 'vec-batch', lineNumber: 1 }),
+        makeChunk({ text: '', role: 'tool', toolCall: { name: 'x', args: '{}' }, sessionId: 'vec-batch', lineNumber: 2 }),
+      ];
+      store.addChunks(chunks.map(chunk => ({ chunk })));
+      const pending = store.takePendingEmbeds(10);
+      expect(pending).toHaveLength(1);
+      expect(pending[0].text).toBe('user text');
     });
   });
 });

@@ -14,6 +14,8 @@ export interface SourceFile {
   inode?: number;
   lastOffset: number;
   lastSize: number;
+  /** 1-based line number of the last indexed complete line (0 on first index). */
+  lastLineNumber: number;
 }
 
 export interface EmbedModelCheck {
@@ -43,6 +45,7 @@ interface SourceFileRow {
   inode: number | null;
   last_offset: number;
   last_size: number;
+  last_line_number: number;
 }
 
 // ----- Store -----
@@ -53,6 +56,10 @@ export class Store {
   // Prepared statements — created once after schema is ready.
   private readonly stmtInsertChunk: Database.Statement;
   private readonly stmtInsertVec: Database.Statement;
+  private readonly stmtClearNeedsEmbed: Database.Statement;
+  private readonly stmtTakePendingEmbeds: Database.Statement;
+  private readonly stmtQueueTotal: Database.Statement;
+  private readonly stmtQueuePending: Database.Statement;
   private readonly stmtGetSourceFile: Database.Statement;
   private readonly stmtUpsertSourceFile: Database.Statement;
   private readonly stmtGetMeta: Database.Statement;
@@ -63,8 +70,8 @@ export class Store {
   private readonly stmtGetSessionChunks: Database.Statement;
 
   // Cached transactions.
-  private readonly txnChunkWithVec: (chunk: Chunk, embedding: number[]) => number;
-  private readonly txnBatch: (items: Array<{ chunk: Chunk; embedding?: number[] }>) => number[];
+  private readonly txnBatch: (items: Array<{ chunk: Chunk }>) => number[];
+  private readonly txnSetEmbedding: (id: number, embedding: number[]) => void;
 
   /**
    * Open (or create) the index database.
@@ -87,24 +94,42 @@ export class Store {
     // ---- prepared statements ----
     this.stmtInsertChunk = this.db.prepare(`
       INSERT INTO chunks
-        (agent_type, session_id, file_path, line_number, role, text, tool_name, tool_args, timestamp)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (agent_type, session_id, file_path, line_number, role, text, tool_name, tool_args, timestamp, needs_embed)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     this.stmtInsertVec = this.db.prepare(
       'INSERT INTO chunks_vec(rowid, embedding) VALUES (?, ?)',
     );
 
+    this.stmtClearNeedsEmbed = this.db.prepare(
+      'UPDATE chunks SET needs_embed = 0 WHERE id = ?',
+    );
+
+    this.stmtTakePendingEmbeds = this.db.prepare(`
+      SELECT id, text FROM chunks WHERE needs_embed = 1 LIMIT ?
+    `);
+
+    this.stmtQueueTotal = this.db.prepare(`
+      SELECT COUNT(*) AS total FROM chunks
+      WHERE (role = 'user' OR role = 'assistant') AND text != ''
+    `);
+
+    this.stmtQueuePending = this.db.prepare(`
+      SELECT COUNT(*) AS pending FROM chunks WHERE needs_embed = 1
+    `);
+
     this.stmtGetSourceFile = this.db.prepare('SELECT * FROM source_files WHERE path = ?');
 
     this.stmtUpsertSourceFile = this.db.prepare(`
-      INSERT INTO source_files (path, agent_type, inode, last_offset, last_size)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO source_files (path, agent_type, inode, last_offset, last_size, last_line_number)
+      VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(path) DO UPDATE SET
-        agent_type  = excluded.agent_type,
-        inode       = excluded.inode,
-        last_offset = excluded.last_offset,
-        last_size   = excluded.last_size
+        agent_type       = excluded.agent_type,
+        inode            = excluded.inode,
+        last_offset      = excluded.last_offset,
+        last_size        = excluded.last_size,
+        last_line_number = excluded.last_line_number
     `);
 
     this.stmtGetMeta = this.db.prepare('SELECT value FROM meta WHERE key = ?');
@@ -139,31 +164,16 @@ export class Store {
     `);
 
     // ---- transactions ----
-    // Used by addChunk when an embedding is being written.
-    // better-sqlite3 promotes inner transactions to savepoints when already inside a transaction.
-    this.txnChunkWithVec = this.db.transaction((chunk: Chunk, embedding: number[]) => {
-      const r = this.stmtInsertChunk.run(
-        chunk.agentType,
-        chunk.sessionId,
-        chunk.filePath,
-        chunk.lineNumber,
-        chunk.role,
-        chunk.text,
-        chunk.toolCall?.name ?? null,
-        chunk.toolCall?.args ?? null,
-        chunk.timestamp,
-      );
-      // Use rawId directly for the BigInt conversion — avoid Number() intermediary
-      // which loses precision beyond Number.MAX_SAFE_INTEGER.
-      const rawId = r.lastInsertRowid;
-      this.stmtInsertVec.run(BigInt(rawId), JSON.stringify(embedding));
-      return Number(rawId);
+
+    // setEmbedding: write vec row + clear needs_embed flag, atomically.
+    this.txnSetEmbedding = this.db.transaction((id: number, embedding: number[]) => {
+      this.stmtInsertVec.run(BigInt(id), JSON.stringify(embedding));
+      this.stmtClearNeedsEmbed.run(id);
     });
 
-    // Used by addChunks — wraps multiple addChunk calls in one transaction.
+    // addChunks: wrap multiple addChunk calls in one transaction.
     this.txnBatch = this.db.transaction(
-      (items: Array<{ chunk: Chunk; embedding?: number[] }>) =>
-        items.map(({ chunk, embedding }) => this.addChunk(chunk, embedding)),
+      (items: Array<{ chunk: Chunk }>) => items.map(({ chunk }) => this.addChunk(chunk)),
     );
   }
 
@@ -181,15 +191,17 @@ export class Store {
         text        TEXT    NOT NULL DEFAULT '',
         tool_name   TEXT,
         tool_args   TEXT,
-        timestamp   TEXT    NOT NULL
+        timestamp   TEXT    NOT NULL,
+        needs_embed INTEGER NOT NULL DEFAULT 0
       );
 
       CREATE TABLE IF NOT EXISTS source_files (
-        path        TEXT    PRIMARY KEY,
-        agent_type  TEXT    NOT NULL,
-        inode       INTEGER,
-        last_offset INTEGER NOT NULL DEFAULT 0,
-        last_size   INTEGER NOT NULL DEFAULT 0
+        path             TEXT    PRIMARY KEY,
+        agent_type       TEXT    NOT NULL,
+        inode            INTEGER,
+        last_offset      INTEGER NOT NULL DEFAULT 0,
+        last_size        INTEGER NOT NULL DEFAULT 0,
+        last_line_number INTEGER NOT NULL DEFAULT 0
       );
 
       CREATE TABLE IF NOT EXISTS meta (
@@ -225,6 +237,39 @@ export class Store {
         VALUES ('delete', old.id, old.text, old.tool_name, old.tool_args);
       END;
     `);
+
+    // Idempotent migrations for existing databases that predate these columns.
+    // When needs_embed is newly added, re-queue any eligible rows that lack a vec row
+    // so they don't silently appear as "embedded" with queueStats().
+    const migrations: Array<{ ddl: string; followUp?: string }> = [
+      {
+        ddl: 'ALTER TABLE chunks ADD COLUMN needs_embed INTEGER NOT NULL DEFAULT 0',
+        followUp: `
+          UPDATE chunks
+          SET    needs_embed = 1
+          WHERE  (role = 'user' OR role = 'assistant')
+            AND  text != ''
+            AND  id NOT IN (SELECT rowid FROM chunks_vec)
+        `,
+      },
+      { ddl: 'ALTER TABLE source_files ADD COLUMN last_line_number INTEGER NOT NULL DEFAULT 0' },
+    ];
+
+    for (const { ddl, followUp } of migrations) {
+      try {
+        this.db.exec(ddl);
+        // Column was just added — run the follow-up if there is one.
+        if (followUp) this.db.exec(followUp);
+      } catch {
+        // Column already exists — safe to ignore; do NOT run followUp again.
+      }
+    }
+
+    // Partial index: only rows that need embedding. Created after the column exists.
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS chunks_needs_embed_idx
+      ON chunks(id) WHERE needs_embed = 1
+    `);
   }
 
   // ------------------------------------------------------------------ chunks
@@ -232,29 +277,13 @@ export class Store {
   /**
    * Insert one chunk. Returns the new row id.
    *
-   * Pass `embedding` to also write a KNN row. Spec rule enforced here:
-   * only `role` user/assistant with non-empty `text` get a vec row. Passing
-   * an embedding for a tool or empty-text chunk is silently ignored.
-   *
-   * When an embedding IS written, both the chunk row and the vec row are
-   * committed atomically (the whole addChunk rolls back if the vec insert fails).
+   * Sets `needs_embed = 1` only for user/assistant chunks with non-empty text.
+   * Embedding is done later via `setEmbedding()` (queue-drain model).
    */
-  addChunk(chunk: Chunk, embedding?: number[]): number {
-    // Per spec: embed only user/assistant chunks with non-empty text.
-    const canEmbed = embedding != null && chunk.role !== 'tool' && chunk.text.length > 0;
+  addChunk(chunk: Chunk): number {
+    const needsEmbed =
+      (chunk.role === 'user' || chunk.role === 'assistant') && chunk.text.length > 0 ? 1 : 0;
 
-    if (canEmbed) {
-      // Validate dimension upfront for a clear error; also prevents a partial write.
-      if (embedding!.length !== EMBED_DIMS) {
-        throw new Error(
-          `Embedding has ${embedding!.length} dimensions; expected ${EMBED_DIMS}`,
-        );
-      }
-      // txnChunkWithVec wraps both the chunk insert (+ FTS trigger) and vec insert atomically.
-      return this.txnChunkWithVec(chunk, embedding!);
-    }
-
-    // No embedding: single INSERT (+ FTS trigger fires in SQLite's implicit transaction).
     const result = this.stmtInsertChunk.run(
       chunk.agentType,
       chunk.sessionId,
@@ -265,6 +294,7 @@ export class Store {
       chunk.toolCall?.name ?? null,
       chunk.toolCall?.args ?? null,
       chunk.timestamp,
+      needsEmbed,
     );
     return Number(result.lastInsertRowid);
   }
@@ -273,8 +303,44 @@ export class Store {
    * Insert multiple chunks in a single transaction.
    * Returns all new row ids in insertion order.
    */
-  addChunks(items: Array<{ chunk: Chunk; embedding?: number[] }>): number[] {
+  addChunks(items: Array<{ chunk: Chunk }>): number[] {
     return this.txnBatch(items);
+  }
+
+  // ------------------------------------------------------------------ embedding queue
+
+  /**
+   * Take up to `limit` chunks that still need embedding.
+   * Returns `{ id, text }` pairs — the caller embeds them and calls `setEmbedding`.
+   */
+  takePendingEmbeds(limit: number): { id: number; text: string }[] {
+    return this.stmtTakePendingEmbeds.all(limit) as { id: number; text: string }[];
+  }
+
+  /**
+   * Write the embedding for chunk `id` and clear `needs_embed`.
+   * Both the vec insert and the flag clear happen in a single transaction.
+   * Throws if `embedding.length !== EMBED_DIMS`.
+   */
+  setEmbedding(id: number, embedding: number[]): void {
+    if (embedding.length !== EMBED_DIMS) {
+      throw new Error(
+        `setEmbedding: embedding has ${embedding.length} dimensions; expected ${EMBED_DIMS}`,
+      );
+    }
+    this.txnSetEmbedding(id, embedding);
+  }
+
+  /**
+   * Counts for CLI/web progress display.
+   * - total:    user/assistant non-empty chunks (those that should get a vec row)
+   * - pending:  still waiting for embedding (needs_embed = 1)
+   * - embedded: already have a vec row (total - pending)
+   */
+  queueStats(): { total: number; embedded: number; pending: number } {
+    const { total } = this.stmtQueueTotal.get() as { total: number };
+    const { pending } = this.stmtQueuePending.get() as { pending: number };
+    return { total, embedded: total - pending, pending };
   }
 
   // ------------------------------------------------------------------ source_files
@@ -288,6 +354,7 @@ export class Store {
       inode: row.inode ?? undefined,
       lastOffset: row.last_offset,
       lastSize: row.last_size,
+      lastLineNumber: row.last_line_number,
     };
   }
 
@@ -298,6 +365,7 @@ export class Store {
       sf.inode ?? null,
       sf.lastOffset,
       sf.lastSize,
+      sf.lastLineNumber,
     );
   }
 
