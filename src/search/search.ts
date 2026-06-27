@@ -18,6 +18,33 @@ export interface SearchResult {
 }
 
 // ---------------------------------------------------------------------------
+// FTS5 query sanitization
+// ---------------------------------------------------------------------------
+
+/**
+ * Sanitize a user query string into a safe FTS5 MATCH expression.
+ *
+ * FTS5 treats many punctuation characters (hyphens, colons, quotes, etc.) as
+ * syntax operators, which causes parse errors for queries like `better-sqlite3`
+ * or `foo:bar`. Wrapping each whitespace-delimited term in double quotes turns
+ * it into a literal phrase search, neutralising all special characters.
+ * Embedded double-quote characters inside a token are stripped so they cannot
+ * break the quoting.
+ *
+ * Examples:
+ *   `better-sqlite3`         →  `"better-sqlite3"`
+ *   `better-sqlite3 WAL`     →  `"better-sqlite3" "WAL"`
+ *   `foo:bar`                →  `"foo:bar"`
+ *   `say "hello"`            →  `"say" "hello"`  (embedded quotes stripped)
+ *   `` (empty)               →  `` (empty — caller skips FTS for empty result)
+ */
+export function sanitizeFtsQuery(query: string): string {
+  const terms = query.trim().split(/\s+/).filter(t => t.length > 0);
+  if (terms.length === 0) return '';
+  return terms.map(t => '"' + t.replace(/"/g, '') + '"').join(' ');
+}
+
+// ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
@@ -122,12 +149,15 @@ export async function search(
   const [queryEmbedding] = await embedder.embed([query], 'query');
 
   // Run both indexes. vecSearch handles an empty vec table by returning [].
-  // FTS5 MATCH throws on punctuation/syntax it can't parse (e.g. "hello-world",
-  // "foo:bar", unmatched quotes). Catch those and fall back to vec-only.
+  // FTS5 MATCH throws on certain punctuation/syntax (e.g. "hello-world",
+  // "foo:bar", unmatched quotes). sanitizeFtsQuery wraps each token in double
+  // quotes so those cases become literal phrase searches that always parse
+  // correctly. The try/catch is kept as a final safety net.
   const vecResults = store.vecSearch(queryEmbedding, poolSize);
   let ftsResults: Array<{ id: number; rank: number }>;
   try {
-    ftsResults = store.ftsSearch(query, poolSize);
+    const safeQuery = sanitizeFtsQuery(query);
+    ftsResults = safeQuery.length > 0 ? store.ftsSearch(safeQuery, poolSize) : [];
   } catch {
     ftsResults = [];
   }

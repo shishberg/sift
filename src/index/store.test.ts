@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import Database from 'better-sqlite3';
 import { Store, EMBED_DIMS } from './store.js';
 import type { Chunk } from '../types.js';
 
@@ -544,6 +545,86 @@ describe('Store', () => {
       const id = store.addChunk(chunk);
       const result = store.getChunk(id);
       expect(result!.toolCall).toEqual({ name: 'bash', args: '{"cmd":"ls"}' });
+    });
+  });
+
+  describe('WAL mode + busy_timeout (concurrency pragmas)', () => {
+    it(':memory: store does not throw — WAL is skipped gracefully', () => {
+      // The beforeEach store is :memory: — it must already be open with no errors.
+      expect(() => store.getMeta('ping')).not.toThrow();
+    });
+
+    it('file-backed store sets journal_mode = wal', () => {
+      const tmpDir = mkdtempSync(join(tmpdir(), 'store-wal-'));
+      const dbPath = join(tmpDir, 'wal.db');
+      let s: Store | undefined;
+      try {
+        s = new Store(dbPath);
+        // Open a second raw connection to verify the persisted journal_mode.
+        const raw = new Database(dbPath, { readonly: true });
+        const jm = raw.pragma('journal_mode', { simple: true }) as string;
+        raw.close();
+        expect(jm).toBe('wal');
+      } finally {
+        s?.close();
+        rmSync(tmpDir, { recursive: true });
+      }
+    });
+
+    it('file-backed store sets busy_timeout = 5000 on its connection', () => {
+      const tmpDir = mkdtempSync(join(tmpdir(), 'store-bt-'));
+      const dbPath = join(tmpDir, 'bt.db');
+      let s: Store | undefined;
+      try {
+        s = new Store(dbPath);
+        // Access the internal db connection to read the per-connection pragma.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const bt = (s as any).db.pragma('busy_timeout', { simple: true }) as number;
+        expect(bt).toBe(5000);
+      } finally {
+        s?.close();
+        rmSync(tmpDir, { recursive: true });
+      }
+    });
+
+    it('file-backed store sets synchronous = NORMAL', () => {
+      const tmpDir = mkdtempSync(join(tmpdir(), 'store-sync-'));
+      const dbPath = join(tmpDir, 'sync.db');
+      let s: Store | undefined;
+      try {
+        s = new Store(dbPath);
+        // synchronous values: 0=OFF, 1=NORMAL, 2=FULL, 3=EXTRA
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const sync = (s as any).db.pragma('synchronous', { simple: true }) as number;
+        expect(sync).toBe(1); // NORMAL
+      } finally {
+        s?.close();
+        rmSync(tmpDir, { recursive: true });
+      }
+    });
+
+    it('two file-backed handles on the same db can read and write without locking', () => {
+      const tmpDir = mkdtempSync(join(tmpdir(), 'store-concurrent-'));
+      const dbPath = join(tmpDir, 'shared.db');
+      let writer: Store | undefined;
+      let reader: Store | undefined;
+      try {
+        writer = new Store(dbPath);
+        reader = new Store(dbPath);
+
+        // writer inserts a chunk; reader must see it without "database is locked"
+        writer.addChunk(makeChunk({ text: 'concurrent test', sessionId: 'conc', lineNumber: 1 }));
+        // Non-null assertion: both stores were assigned two lines above; if
+        // either constructor threw, we'd already be in the finally block.
+        expect(() => reader!.getSessionChunks('conc')).not.toThrow();
+        const chunks = reader!.getSessionChunks('conc');
+        expect(chunks).toHaveLength(1);
+        expect(chunks[0].text).toBe('concurrent test');
+      } finally {
+        writer?.close();
+        reader?.close();
+        rmSync(tmpDir, { recursive: true });
+      }
     });
   });
 

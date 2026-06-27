@@ -23,14 +23,17 @@ async function loadSession(): Promise<void> {
     if (!res.ok) {
       const body = (await res.json()) as { error?: string };
       error.value = body.error ?? ('Server error ' + res.status);
+      loading.value = false;
       return;
     }
     session.value = (await res.json()) as SessionResponse;
+    // Must set loading = false BEFORE nextTick so the v-if="!loading && session"
+    // block renders the chunks into the DOM before scrollToMatch queries for them.
+    loading.value = false;
     await nextTick();
     scrollToMatch();
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Could not load session.';
-  } finally {
     loading.value = false;
   }
 }

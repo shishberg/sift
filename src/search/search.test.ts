@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Store, EMBED_DIMS } from '../index/store.js';
 import type { Embedder } from '../embed/types.js';
 import type { Chunk } from '../types.js';
-import { rrfFuse, search } from './search.js';
+import { rrfFuse, search, sanitizeFtsQuery } from './search.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -35,6 +35,48 @@ function makeFakeEmbedder(queryVector: number[]): Embedder {
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// sanitizeFtsQuery — pure unit tests (no DB, no network)
+// ---------------------------------------------------------------------------
+
+describe('sanitizeFtsQuery', () => {
+  it('wraps a simple term in double quotes', () => {
+    expect(sanitizeFtsQuery('hello')).toBe('"hello"');
+  });
+
+  it('wraps a hyphenated term so hyphens are treated as literals', () => {
+    expect(sanitizeFtsQuery('better-sqlite3')).toBe('"better-sqlite3"');
+  });
+
+  it('wraps each whitespace-delimited token separately', () => {
+    expect(sanitizeFtsQuery('better-sqlite3 WAL')).toBe('"better-sqlite3" "WAL"');
+  });
+
+  it('handles colon-containing terms', () => {
+    expect(sanitizeFtsQuery('foo:bar')).toBe('"foo:bar"');
+  });
+
+  it('strips embedded double quotes from tokens', () => {
+    // A raw double-quote inside a token would break the FTS5 quoting; strip it.
+    expect(sanitizeFtsQuery('say "hello"')).toBe('"say" "hello"');
+  });
+
+  it('returns empty string for blank input', () => {
+    expect(sanitizeFtsQuery('')).toBe('');
+    expect(sanitizeFtsQuery('   ')).toBe('');
+  });
+
+  it('handles a lone double-quote character', () => {
+    // Token `"` passes the length filter; its internal quote is stripped,
+    // producing the FTS5 term `""` (empty phrase — parses fine, matches nothing).
+    expect(sanitizeFtsQuery('"')).toBe('""');
+  });
+
+  it('collapses multiple spaces between terms', () => {
+    expect(sanitizeFtsQuery('foo   bar')).toBe('"foo" "bar"');
+  });
+});
 
 // ---------------------------------------------------------------------------
 // rrfFuse — pure unit tests (no DB, no network)
@@ -335,6 +377,39 @@ describe('search', () => {
     // Vec results should still come back even when FTS throws
     const results = await search('"unclosed', { store, embedder });
     expect(results.some(r => r.sessionId === 'fts-error-session')).toBe(true);
+  });
+
+  it('punctuated query (better-sqlite3) matches via FTS — not vec-only fallback', async () => {
+    // Seed a chunk containing the hyphenated token. No embedding is set, so the
+    // vec table is empty → any result must come from FTS.
+    store.addChunk(
+      makeChunk({
+        text: 'we use better-sqlite3 as the SQLite driver',
+        sessionId: 'fts-hyphen-session',
+        lineNumber: 1,
+      }),
+    );
+
+    // Fake embedder returns a zero vector — irrelevant since vec table is empty.
+    const embedder = makeFakeEmbedder(makeEmbedding(0.0));
+    const results = await search('better-sqlite3', { store, embedder });
+
+    // The hyphenated query must reach FTS (via sanitizeFtsQuery) and find the chunk.
+    expect(results.some(r => r.sessionId === 'fts-hyphen-session')).toBe(true);
+  });
+
+  it('colon-query (foo:bar) matches via FTS', async () => {
+    store.addChunk(
+      makeChunk({
+        text: 'the endpoint is foo:bar baz',
+        sessionId: 'fts-colon-session',
+        lineNumber: 1,
+      }),
+    );
+
+    const embedder = makeFakeEmbedder(makeEmbedding(0.0));
+    const results = await search('foo:bar', { store, embedder });
+    expect(results.some(r => r.sessionId === 'fts-colon-session')).toBe(true);
   });
 
   it('handles multiple agent types correctly', async () => {

@@ -90,6 +90,20 @@ export class Store {
 
     this.db = new Database(resolved);
     sqliteVec.load(this.db);
+
+    // WAL mode lets readers run concurrently with a single writer — the core
+    // use case is searching while a backfill writes. Skip for :memory: because
+    // SQLite ignores the pragma there and better-sqlite3 returns 'memory'.
+    if (resolved !== ':memory:') {
+      this.db.pragma('journal_mode = WAL');
+      // NORMAL sync is safe with WAL (committed data survives crashes) and
+      // avoids the per-write fsync overhead of the default FULL mode.
+      this.db.pragma('synchronous = NORMAL');
+    }
+    // Wait up to 5 s before throwing "database is locked" so the searcher and
+    // the writer can share the file without manual retry logic.
+    this.db.pragma('busy_timeout = 5000');
+
     this.createSchema();
 
     // ---- prepared statements ----
