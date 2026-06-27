@@ -6,6 +6,9 @@
   "engines": {
     "node": ">=20"
   },
+  "bin": {
+    "agent-search": "dist/cli/cli.js"
+  },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
