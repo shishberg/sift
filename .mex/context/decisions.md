@@ -22,6 +22,40 @@ last_updated: 2026-06-27
 
 ## Decision Log
 
+### Persistent embedding queue decouples ingestion from embedding
+**Date:** 2026-06-27
+**Status:** Active
+**Decision:** Ingestion writes the `chunks` row + FTS immediately and marks
+user/assistant text chunks with `needs_embed = 1`. A single-flight in-process
+consumer drains pending chunks in batches — embed via ollama, write the vec row,
+set `needs_embed = 0` — in a transaction. Ingestion never blocks on embedding.
+Failed embeds keep `needs_embed = 1` and retry on the next drain.
+**Reasoning:** Agent logs can be written faster than embedding (the slow step)
+can keep up. Persisting the pending state in the DB makes it crash-safe (pending
+chunks survive a restart) and gives natural backpressure — the watcher just
+appends rows; the consumer catches up independently. This is the user's
+"text row with a NULL vector FK, drained by a single-flight consumer" idea,
+implemented as an indexed flag column.
+**Alternatives considered:** Inline embedding in addChunk (rejected — blocks
+ingestion, loses progress on crash); an external job queue (rejected — overkill
+for a local single-user tool, SQLite is the queue).
+**Consequences:** `chunks.needs_embed` column + partial index. Store exposes
+`takePendingEmbeds`, `setEmbedding`, `queueStats`. **Backfill is NOT a separate
+operation** — it's the watcher's startup scan writing rows, drained by the same
+consumer. Progress = `queueStats() {total, embedded, pending}`.
+
+### Queue progress is surfaced in both CLI and web
+**Date:** 2026-06-27
+**Status:** Active
+**Decision:** `queueStats()` drives a progress indicator in both interfaces.
+CLI: an `agent-search status` command + a live progress bar during index/watch.
+Web: `GET /api/status` returns the stats; the app polls it and renders the
+shadcn-vue `Progress` component. Covers backfill automatically (it's just the
+queue draining).
+**Reasoning:** The user wants visibility into indexing/embedding progress,
+especially during the initial large backfill.
+**Consequences:** Web stack is Vue 3 + Vite + shadcn-vue + Tailwind 4.
+
 ### Reciprocal Rank Fusion (RRF) to merge vector + FTS results
 **Date:** 2026-06-27
 **Status:** Active

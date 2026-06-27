@@ -122,8 +122,10 @@ Session id: prefer an id carried on the record; otherwise derive from the filena
 - Ignore `event_msg`, `turn_context` (duplicate/UI-event data; the response_items are the
   canonical transcript).
 
-## PI format — `~/.pi/agent/sessions/<project-slug>/<id>.jsonl`
-- `session` record: `id` = session id, `cwd`, `timestamp`. Fall back to filename stem.
+## PI format — `~/.pi/agent/sessions/<project-slug>/<timestamp>_<id>.jsonl`
+- Filename is `<timestamp>_<id>.jsonl`; the session id is the part after the last `_`
+  (matches the `session` record's `id`). Fall back to the full stem if no `_`.
+- `session` record: `id` = session id, `cwd`, `timestamp`.
 - **Index `message` records.** `timestamp` top-level ISO. `message.role` =
   `user` | `assistant` | `toolResult`. `message.content` is an array of blocks:
   - `{ type: 'text', text }` → text chunk (role user/assistant).
@@ -141,7 +143,9 @@ Session id: prefer an id carried on the record; otherwise derive from the filena
 - Load sqlite-vec via `sqliteVec.load(db)`.
 - Tables:
   - `chunks(id INTEGER PK, agent_type, session_id, file_path, line_number, role,
-    text, tool_name, tool_args, timestamp)`.
+    text, tool_name, tool_args, timestamp, needs_embed INTEGER NOT NULL DEFAULT 0)`.
+    Partial index on `needs_embed` where `needs_embed = 1`. Set `needs_embed = 1`
+    only for user/assistant chunks with non-empty text; everything else stays 0.
   - `source_files(path PK, agent_type, inode, last_offset, last_size)`.
   - `meta(key PK, value)` — store `embed_model`, `embed_dims`. A model/dims mismatch
     on open ⇒ the index must be rebuilt (surface clearly; V1 may just warn + reindex).
@@ -149,6 +153,19 @@ Session id: prefer an id carried on the record; otherwise derive from the filena
     with triggers to keep it in sync (or populate manually on insert).
   - sqlite-vec virtual table `chunks_vec(embedding float[768])` keyed by chunk rowid;
     only user/assistant text chunks get a vector.
+
+## Embedding queue / consumer (decouples ingestion from embedding)
+See the "Persistent embedding queue" decision in `decisions.md`. Ingestion writes
+chunk + FTS rows immediately and marks user/assistant text chunks `needs_embed = 1`.
+A **single-flight** in-process consumer drains them:
+- Store methods: `addChunk(chunk)` (no inline embedding; sets needs_embed),
+  `takePendingEmbeds(limit): {id, text}[]`, `setEmbedding(id, embedding)` (writes vec
+  row + clears needs_embed, in a transaction), `queueStats(): {total, embedded, pending}`.
+- Consumer: a `kick()`-able worker. If already running, `kick()` is a no-op; otherwise it
+  loops `takePendingEmbeds → embed batch → setEmbedding` until pending is 0. Failed batch ⇒
+  leave `needs_embed = 1` (retries next kick), log, brief backoff.
+- The watcher calls `kick()` after writing new rows. **Backfill is just the startup scan
+  feeding the same queue — not a separate operation.**
 
 ## Embedder
 - Interface: `embed(texts: string[], kind: 'document' | 'query'): Promise<number[][]>`.
@@ -168,13 +185,21 @@ Session id: prefer an id carried on the record; otherwise derive from the filena
 - `agent-search <query>` → ranked results (session id, agent, file:line, snippet).
 - `agent-search show <sessionId>` → print the transcript (user/assistant messages by
   default). `--help` explains how to go from a result to a transcript.
-- `agent-search index` → run a one-shot backfill/index. `agent-search watch` → watch.
+- `agent-search index` → one-shot: scan all dirs, write rows, drain the embed queue to
+  completion (with a live progress bar), then exit. `agent-search watch` → watch + keep
+  draining (live progress bar). `agent-search status` → print `queueStats` (total /
+  embedded / pending) + a text progress bar, then exit.
+- Progress bar: hand-rolled (carriage-return), no heavy dep, driven by `queueStats()`.
 
 ## Server + web (lowest priority, after CLI works)
 - `src/server/server.ts`: minimal HTTP API. `GET /api/search?q=` → results JSON.
-  `GET /api/session/:id` → transcript JSON. Read-only.
-- `web/`: Vue 3 + Vite + shadcn-vue. Search box → results list (each shows session id +
-  matching line) → click → session view scrolled to the match. Session id in the URL.
+  `GET /api/session/:id` → transcript JSON. `GET /api/status` → `queueStats` JSON.
+  Read-only. Optionally start the watcher so the web app indexes live.
+- `web/`: Vue 3 + Vite + **shadcn-vue + Tailwind 4**. Search box → results list (each
+  shows session id + matching line) → click → session view scrolled to the match. Session
+  id in the URL. A **queue progress bar** (shadcn-vue `Progress` component,
+  https://www.shadcn-vue.com/docs/components/progress) polls `/api/status` and shows
+  indexing/embedding progress (visible during backfill since backfill = normal draining).
 
 ## OPEN items (make a judgment call, leave a note)
 - Exact chunking (currently: one block = one chunk). Fine for V1.
