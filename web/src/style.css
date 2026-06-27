@@ -1,0 +1,145 @@
+@import "tailwindcss";
+
+/* ── Design tokens ─────────────────────────────────────────────────────── */
+:root {
+  --bg: #fafaf8;
+  --fg: #111118;
+  --violet: #5b21b6;
+  --violet-subtle: #ede9fe;
+  --violet-border: #c4b5fd;
+  --muted-fg: #71717a;
+  --border: #e4e4e0;
+  --surface: #f4f4f0;
+  --surface-hover: #eeeeea;
+  --white: #ffffff;
+
+  /* Agent badge colors */
+  --claude-text: #92400e;
+  --claude-bg: #fef3c7;
+  --codex-text: #1e40af;
+  --codex-bg: #dbeafe;
+  --pi-text: #065f46;
+  --pi-bg: #d1fae5;
+}
+
+/* ── Tailwind theme mapping ────────────────────────────────────────────── */
+@theme inline {
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+  --color-primary: var(--violet);
+  --color-primary-foreground: #fff;
+  --color-secondary: var(--surface);
+  --color-secondary-foreground: var(--fg);
+  --color-muted: var(--surface);
+  --color-muted-foreground: var(--muted-fg);
+  --color-border: var(--border);
+  --color-ring: var(--violet);
+  --color-card: var(--white);
+  --color-card-foreground: var(--fg);
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* ── Base ──────────────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--fg);
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  margin: 0;
+}
+
+/* ── Typography helpers ─────────────────────────────────────────────────── */
+.font-mono {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* ── Agent badges ──────────────────────────────────────────────────────── */
+.badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 2px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.badge-claude {
+  color: var(--claude-text);
+  background: var(--claude-bg);
+}
+.badge-codex {
+  color: var(--codex-text);
+  background: var(--codex-bg);
+}
+.badge-pi {
+  color: var(--pi-text);
+  background: var(--pi-bg);
+}
+.badge-role {
+  color: var(--muted-fg);
+  background: var(--surface);
+  font-size: 11px;
+}
+
+/* ── Role rule (transcript divider) ────────────────────────────────────── */
+.role-rule {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.role-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--muted-fg);
+  white-space: nowrap;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.rule-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* ── Matched chunk highlight ────────────────────────────────────────────── */
+.chunk-matched {
+  border-left: 2px solid var(--violet);
+  background: rgba(237, 233, 254, 0.35);
+  margin-left: -16px;
+  padding-left: 14px;
+  border-radius: 0 4px 4px 0;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #c4c4c0;
+}

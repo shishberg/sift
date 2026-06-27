@@ -16,6 +16,7 @@ import { buildRegistry } from '../adapters/registry.js';
 import { EmbedWorker } from '../ingest/indexer.js';
 import { Watcher } from '../ingest/watcher.js';
 import { search, type SearchResult } from '../search/search.js';
+import { startServer, DEFAULT_PORT } from '../server/server.js';
 import type { Chunk } from '../types.js';
 
 // ---------------------------------------------------------------------------
@@ -31,6 +32,7 @@ USAGE
   agent-search index
   agent-search watch
   agent-search status
+  agent-search serve [--port N] [--watch]
   agent-search --help
 
 COMMANDS
@@ -59,9 +61,18 @@ COMMANDS
       Print current embedding queue stats (total / embedded / pending) and
       a text progress bar, then exit.
 
+  serve [--port N] [--watch]
+      Start the HTTP API server (default port: ${DEFAULT_PORT}, override via
+      AGENT_SEARCH_PORT or --port). Serves the web app from web/dist and
+      exposes /api/search, /api/session/:id, and /api/status.
+      Pass --watch to also start the file watcher + embed worker so the web
+      app shows live indexing progress.
+
 OPTIONS
   --limit N     Max search results to return (default: 20).
   --tools       Include tool call chunks in transcript output (show command).
+  --port N      Port for the serve command (default: ${DEFAULT_PORT}).
+  --watch       Start watcher + embed worker alongside the server (serve only).
   -h, --help    Show this help.
 
 EMBEDDING
@@ -235,11 +246,13 @@ export function cmdStatus(
 // ---------------------------------------------------------------------------
 
 export interface ParsedCli {
-  command: 'search' | 'show' | 'index' | 'watch' | 'status' | 'help';
+  command: 'search' | 'show' | 'index' | 'watch' | 'status' | 'serve' | 'help';
   query?: string;
   sessionId?: string;
   limit?: number;
   showTools?: boolean;
+  port?: number;
+  watch?: boolean;
 }
 
 /**
@@ -267,6 +280,22 @@ export function parseCli(argv: string[]): ParsedCli {
   if (first === 'index') return { command: 'index' };
   if (first === 'watch') return { command: 'watch' };
   if (first === 'status') return { command: 'status' };
+  if (first === 'serve') {
+    const portIdx = rest.indexOf('--port');
+    let port: number | undefined;
+    if (portIdx !== -1) {
+      if (portIdx + 1 < rest.length && !rest[portIdx + 1]!.startsWith('-')) {
+        const raw = rest[portIdx + 1]!;
+        const parsed = parseInt(raw, 10);
+        port = !isNaN(parsed) && parsed > 0 && String(parsed) === raw.trim() ? parsed : NaN;
+      } else {
+        // --port with no following value → signal a bad arg to main()
+        port = NaN;
+      }
+    }
+    const watch = rest.includes('--watch');
+    return { command: 'serve', port, watch };
+  }
 
   // Default: everything that isn't a known flag becomes the search query.
   // Strip ALL --limit <N> occurrences; use the last valid one found.
@@ -456,6 +485,66 @@ async function main(): Promise<void> {
     store.close();
 
     console.log(`Done. ${stats.embedded}/${stats.total} chunks embedded.`);
+    return;
+  }
+
+  // ---- serve ----
+  if (parsed.command === 'serve') {
+    if (parsed.port !== undefined && (isNaN(parsed.port) || parsed.port <= 0)) {
+      console.error('--port must be a positive integer (e.g. --port 3737)');
+      process.exit(1);
+    }
+
+    const store = new Store();
+    const embedder = new OllamaEmbedder();
+
+    let watcher: Watcher | undefined;
+    let embedWorker: EmbedWorker | undefined;
+
+    if (parsed.watch) {
+      const registry = buildRegistry();
+      embedWorker = new EmbedWorker(store, embedder, { backoffMs: 1000 });
+      watcher = new Watcher(store, registry, embedWorker);
+      console.log('Starting file watcher + embed worker…');
+      watcher.start();
+      embedWorker.kick();
+    }
+
+    const { url, server } = await startServer(
+      {
+        search: (q, limit) => search(q, { store, embedder }, { limit }),
+        getSession: (sessionId) => {
+          const chunks = store.getSessionChunks(sessionId);
+          return {
+            sessionId,
+            filePath: chunks[0]?.filePath ?? '',
+            chunks,
+          };
+        },
+        getStatus: () => store.queueStats(),
+      },
+      { port: parsed.port },
+    );
+
+    console.log(`agent-search server running at ${url}`);
+    if (parsed.watch) {
+      console.log('Watching agent log directories. Ctrl-C to stop.');
+    }
+
+    // Graceful shutdown on SIGINT: close server, watcher, store.
+    process.once('SIGINT', () => {
+      console.log('\nStopping…');
+      void (async () => {
+        if (watcher) await watcher.stop();
+        await new Promise<void>((resolve, reject) =>
+          server.close((err) => (err ? reject(err) : resolve())),
+        );
+        store.close();
+        process.exit(0);
+      })();
+    });
+
+    // Block indefinitely (the http.Server keeps the event loop alive).
     return;
   }
 

@@ -434,6 +434,44 @@ describe('parseCli', () => {
     expect(args.command).toBe('status');
   });
 
+  it('parses serve command with no options', () => {
+    const args = parseCli(['serve']);
+    expect(args.command).toBe('serve');
+    expect(args.port).toBeUndefined();
+    expect(args.watch).toBe(false);
+  });
+
+  it('parses serve with --port', () => {
+    const args = parseCli(['serve', '--port', '4000']);
+    expect(args.command).toBe('serve');
+    expect(args.port).toBe(4000);
+  });
+
+  it('parses serve with --watch', () => {
+    const args = parseCli(['serve', '--watch']);
+    expect(args.command).toBe('serve');
+    expect(args.watch).toBe(true);
+  });
+
+  it('parses serve with --port and --watch', () => {
+    const args = parseCli(['serve', '--port', '8080', '--watch']);
+    expect(args.command).toBe('serve');
+    expect(args.port).toBe(8080);
+    expect(args.watch).toBe(true);
+  });
+
+  it('marks a non-integer serve port as NaN', () => {
+    const args = parseCli(['serve', '--port', 'abc']);
+    expect(args.command).toBe('serve');
+    expect(args.port).toBeNaN();
+  });
+
+  it('marks --port with no value as NaN', () => {
+    const args = parseCli(['serve', '--port']);
+    expect(args.command).toBe('serve');
+    expect(args.port).toBeNaN();
+  });
+
   it('returns help command for --help flag', () => {
     const args = parseCli(['--help']);
     expect(args.command).toBe('help');
