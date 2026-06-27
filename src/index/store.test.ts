@@ -498,6 +498,55 @@ describe('Store', () => {
     });
   });
 
+  describe('getChunk', () => {
+    it('returns undefined for an id that does not exist', () => {
+      expect(store.getChunk(999)).toBeUndefined();
+    });
+
+    it('returns the chunk for a known id', () => {
+      const chunk = makeChunk({ sessionId: 'gc-session', lineNumber: 7 });
+      const id = store.addChunk(chunk);
+      const result = store.getChunk(id);
+      expect(result).toBeDefined();
+      expect(result!.sessionId).toBe('gc-session');
+      expect(result!.lineNumber).toBe(7);
+    });
+
+    it('round-trips all chunk fields', () => {
+      const chunk = makeChunk({
+        agentType: 'codex',
+        sessionId: 'gc-full',
+        filePath: '/some/file.jsonl',
+        lineNumber: 42,
+        role: 'assistant',
+        text: 'some assistant text',
+        timestamp: '2026-06-01T10:00:00Z',
+      });
+      const id = store.addChunk(chunk);
+      const result = store.getChunk(id);
+      expect(result).toMatchObject({
+        agentType: 'codex',
+        sessionId: 'gc-full',
+        filePath: '/some/file.jsonl',
+        lineNumber: 42,
+        role: 'assistant',
+        text: 'some assistant text',
+        timestamp: '2026-06-01T10:00:00Z',
+      });
+    });
+
+    it('round-trips toolCall fields', () => {
+      const chunk = makeChunk({
+        role: 'tool',
+        text: '',
+        toolCall: { name: 'bash', args: '{"cmd":"ls"}' },
+      });
+      const id = store.addChunk(chunk);
+      const result = store.getChunk(id);
+      expect(result!.toolCall).toEqual({ name: 'bash', args: '{"cmd":"ls"}' });
+    });
+  });
+
   describe('addChunks (batch insert)', () => {
     it('inserts multiple chunks and returns all ids', () => {
       const chunks = [

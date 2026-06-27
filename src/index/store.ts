@@ -67,6 +67,7 @@ export class Store {
   private readonly stmtFtsSearch: Database.Statement;
   private readonly stmtCountVec: Database.Statement;
   private readonly stmtVecSearch: Database.Statement;
+  private readonly stmtGetChunk: Database.Statement;
   private readonly stmtGetSessionChunks: Database.Statement;
 
   // Cached transactions.
@@ -156,6 +157,8 @@ export class Store {
         AND  k = ?
       ORDER  BY distance
     `);
+
+    this.stmtGetChunk = this.db.prepare('SELECT * FROM chunks WHERE id = ?');
 
     this.stmtGetSessionChunks = this.db.prepare(`
       SELECT * FROM chunks
@@ -408,6 +411,13 @@ export class Store {
   }
 
   // ------------------------------------------------------------------ session view
+
+  /** Fetch a single chunk by its primary key id. Returns undefined if not found. */
+  getChunk(id: number): Chunk | undefined {
+    const row = this.stmtGetChunk.get(id) as ChunkRow | undefined;
+    if (!row) return undefined;
+    return rowToChunk(row);
+  }
 
   /** All chunks for a session, ordered by file_path then line_number. */
   getSessionChunks(sessionId: string): Chunk[] {
