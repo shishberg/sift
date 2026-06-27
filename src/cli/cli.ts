@@ -488,44 +488,6 @@ async function importOpencode(store: Store, write: (s: string) => void): Promise
 // Progress display for index / watch (used only by main())
 // ---------------------------------------------------------------------------
 
-/**
- * Poll queueStats and rewrite a progress bar until shouldStop() returns true
- * or pending reaches 0.
- *
- * On a TTY: uses carriage-return (\r) to rewrite the same line.
- * Off a TTY: prints a new line only when the bar text changes.
- */
-async function progressLoop(opts: {
-  queueStats: () => { total: number; embedded: number; pending: number };
-  shouldStop: () => boolean;
-  isTTY: boolean;
-  write: (s: string) => void;
-  writeRaw: (s: string) => void;
-  intervalMs?: number;
-}): Promise<void> {
-  const { queueStats, shouldStop, isTTY, write, writeRaw, intervalMs = 500 } = opts;
-  let lastBar = '';
-
-  while (!shouldStop()) {
-    const stats = queueStats();
-    const bar = renderProgressBar(stats);
-
-    if (isTTY) {
-      writeRaw(`\r${bar}`);
-    } else if (bar !== lastBar) {
-      write(bar);
-      lastBar = bar;
-    }
-
-    if (stats.pending === 0) {
-      if (isTTY) writeRaw('\n');
-      break;
-    }
-
-    await new Promise<void>((r) => setTimeout(r, intervalMs));
-  }
-}
-
 // ---------------------------------------------------------------------------
 // main()
 // ---------------------------------------------------------------------------
