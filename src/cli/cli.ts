@@ -8,7 +8,7 @@
  */
 
 import { fileURLToPath } from 'node:url';
-import { realpathSync } from 'node:fs';
+import { realpathSync, existsSync } from 'node:fs';
 import { basename } from 'node:path';
 import { Store } from '../index/store.js';
 import { OllamaEmbedder } from '../embed/ollama.js';
@@ -17,6 +17,7 @@ import { EmbedWorker } from '../ingest/indexer.js';
 import { Watcher } from '../ingest/watcher.js';
 import { search, type SearchResult } from '../search/search.js';
 import { startServer, DEFAULT_PORT } from '../server/server.js';
+import { OpenCodeSource, DEFAULT_OPENCODE_DB_PATH } from '../sources/opencode.js';
 import type { Chunk } from '../types.js';
 
 // ---------------------------------------------------------------------------
@@ -329,6 +330,33 @@ export function parseCli(argv: string[]): ParsedCli {
 }
 
 // ---------------------------------------------------------------------------
+// opencode one-shot import (used by index + watch)
+// ---------------------------------------------------------------------------
+
+/**
+ * Pull new opencode sessions into the store. Silently skips when opencode is
+ * not installed (no DB file). Logs counts when chunks are found, warns on error.
+ *
+ * Watch integration: opencode is not a JSONL file-watcher target, so this is a
+ * one-shot pull at the start of both `index` and `watch` runs. For live watch
+ * coverage you would poll the DB file's mtime; that is left as a future
+ * enhancement. The cursor persists across runs, so re-indexing picks up only
+ * new sessions.
+ */
+async function importOpencode(store: Store, write: (s: string) => void): Promise<void> {
+  if (!existsSync(DEFAULT_OPENCODE_DB_PATH)) return;
+  try {
+    const source = new OpenCodeSource(DEFAULT_OPENCODE_DB_PATH);
+    const count = source.index(store);
+    source.close();
+    if (count > 0) write(`Indexed ${count} chunks from opencode.`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    write(`[warn] opencode import failed (skipped): ${msg}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Progress display for index / watch (used only by main())
 // ---------------------------------------------------------------------------
 
@@ -463,6 +491,10 @@ async function main(): Promise<void> {
 
     const isTTY = process.stdout.isTTY ?? false;
 
+    // Pull opencode sessions before the JSONL scan so the embed queue drains
+    // them together with JSONL chunks in the same progress pass.
+    await importOpencode(store, (s) => console.log(s));
+
     console.log('Scanning agent log directories…');
     watcher.start();
 
@@ -568,6 +600,9 @@ async function main(): Promise<void> {
         process.exit(0);
       });
     });
+
+    // One-shot opencode pull at startup. Future: poll DB file mtime for live updates.
+    await importOpencode(store, (s) => console.log(s));
 
     console.log('Watching agent log directories. Ctrl-C to stop.');
     watcher.start();

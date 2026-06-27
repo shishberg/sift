@@ -8,7 +8,7 @@ import type { Chunk } from '../types.js';
 
 export interface SearchResult {
   sessionId: string;
-  agentType: 'claude' | 'codex' | 'pi';
+  agentType: 'claude' | 'codex' | 'pi' | 'opencode';
   filePath: string;
   lineNumber: number;
   role: 'user' | 'assistant' | 'tool';

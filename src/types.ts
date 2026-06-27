@@ -1,7 +1,7 @@
 export type Role = 'user' | 'assistant' | 'tool';
 
 export interface Chunk {
-  agentType: 'claude' | 'codex' | 'pi';
+  agentType: 'claude' | 'codex' | 'pi' | 'opencode';
   sessionId: string;
   filePath: string;
   lineNumber: number; // 1-based line in the file

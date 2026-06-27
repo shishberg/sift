@@ -466,6 +466,22 @@ export class Store {
     };
   }
 
+  // ------------------------------------------------------------------ transaction helper
+
+  /**
+   * Run `fn` inside a single SQLite transaction. When called from within an
+   * already-active transaction (e.g. from addChunks), better-sqlite3 promotes
+   * the inner call to a SAVEPOINT automatically, keeping the whole operation
+   * atomic.
+   *
+   * Use this when you need to combine two store operations (e.g. addChunks +
+   * setMeta) atomically — the opencode source uses it to update the cursor and
+   * insert chunks in one go.
+   */
+  runTransaction<T>(fn: () => T): T {
+    return (this.db.transaction(fn) as () => T)();
+  }
+
   // ------------------------------------------------------------------ lifecycle
 
   close(): void {
