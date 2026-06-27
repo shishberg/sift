@@ -31,29 +31,25 @@ Then read this file fully before doing anything else in this session.
 
 ## Current Project State
 
-**New project — nothing is built yet.** The scaffold is populated; implementation
-has not started. The base design is decided (see `context/decisions.md`); most
-implementation details are marked `[TO BE DETERMINED]` in the context files.
+**V1 is built and working.** Implemented via TDD, on `main`, 303 tests passing.
+See `context/impl-spec.md` for the concrete build and `context/decisions.md` for the why.
 
-**Working:**
-- Nothing yet — greenfield.
+**Working (all verified end-to-end against real logs, ~35k chunks):**
+- chokidar watcher over the agent session dirs (dirs derived from adapter `rootDir`s)
+- Agent adapters: claude, codex, pi (JSONL) + an opencode SQLite **source**
+- Byte-offset JSONL tail + `source_files` (offset/inode/line-number) tracking
+- SQLite index: sqlite-vec (768-dim) + FTS5, WAL mode, BigInt vec rowids
+- Persistent embedding queue (`needs_embed`) drained by a single-flight consumer;
+  backfill = the watcher's startup scan (not a separate op)
+- Local embedder: ollama `nomic-embed-text`, with task prefixes + a model/dims guard
+- Hybrid search: vec + FTS5 merged with RRF (k=60); FTS queries sanitized for punctuation
+- CLI: search, show, index, watch, status, serve (+ live progress bar)
+- Web app: Vue 3 + Vite + shadcn-vue + Tailwind 4; search, session view (scroll-to-match),
+  live queue Progress bar polling `/api/status`
 
-**Not yet built:**
-- Directory watcher (chokidar) over the agent session dirs
-- Agent adapters (claude, codex, pi)
-- Byte-offset JSONL tailing + `source_files` tracking
-- SQLite index with sqlite-vec + FTS5
-- Local embedder (ollama + nomic-embed-text, 768 dims)
-- CLI (read-only search, `--help`)
-- Web app (Vue/Vite/shadcn-vue)
-
-**Known issues:**
-- None yet.
-
-**Open implementation details (not blocking — resolve as you build):**
-- Chunking strategy and the compact tool-call form for FTS
-- Per-agent JSON schemas (inspect real logs)
-- Validate RRF fusion (k≈60) on real queries; tune only if poor
+**Known issues / follow-ups (non-blocking):**
+- See the handoff doc for the remaining minor notes. RRF validated qualitatively on real
+  queries (results look good); no tuning needed so far.
 
 ## Routing Table
 

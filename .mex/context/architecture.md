@@ -56,5 +56,7 @@ surface enough identity (session id, file path) to find the original log.
 - No write path to agent sessions — read-only, the agent owns the logs.
 - No chat resume / replay — this indexes and displays, it does not drive agents.
 - No cloud services, no auth, no multi-user, no hosted/remote deployment — local single-user tool.
-- No opencode support in V1 (it uses its own SQLite DB, not append-only JSONL).
+- opencode is supported, but via a read-only **source** that reads its SQLite DB
+  directly (`src/sources/opencode.ts`) — not the JSONL adapter/watcher path. See
+  `context/decisions.md`.
 - No agent hooks in V1 — directory watching is the only trigger (hooks kept open for later, esp. opencode).

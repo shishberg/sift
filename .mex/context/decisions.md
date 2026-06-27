@@ -22,6 +22,27 @@ last_updated: 2026-06-27
 
 ## Decision Log
 
+### opencode now supported via a read-only SQLite "source" (no longer V1-excluded)
+**Date:** 2026-06-27
+**Status:** Active
+**Decision:** Index opencode sessions by reading its SQLite DB
+(`~/.local/share/opencode/opencode.db`) directly, read-only, through a parallel
+**source** abstraction (`src/sources/opencode.ts`) — NOT the JSONL adapter/tail/
+watcher path. The source queries opencode's `part`+`message` tables, maps rows to
+the common `Chunk` shape (`agentType: 'opencode'`), and feeds the same store +
+embedding queue. Incremental via an `opencode_cursor` (max rowid) in `meta`;
+inserts + cursor advance are one transaction (idempotent). The CLI `index`/`watch`
+commands import opencode alongside the JSONL dirs.
+**Reasoning:** The user asked for opencode support. Its sessions live in a live
+SQLite DB, not append-only JSONL, so the file-watcher/byte-offset model doesn't
+apply — but a read-only query path is straightforward and keeps all
+opencode-specific knowledge behind one module (same boundary principle as adapters).
+**Supersedes:** the earlier "No opencode support in V1" note (it used its own DB,
+not JSONL). That reasoning still explains why it's a *source*, not an *adapter*.
+**Consequences:** `agentType` union is `claude|codex|pi|opencode`; adapters stay
+`claude|codex|pi` (`JsonlAgentType`). opencode.db is opened `{ readonly: true }`
+(WAL allows concurrent reads while opencode runs). Never written to.
+
 ### Persistent embedding queue decouples ingestion from embedding
 **Date:** 2026-06-27
 **Status:** Active

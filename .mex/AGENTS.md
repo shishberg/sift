@@ -17,7 +17,14 @@ A searchable index of agent session logs (Claude, Codex, pi) with local CLI and 
 - Every result must carry its session id so the original log can be found.
 
 ## Commands
-[TO BE DETERMINED — nothing built yet. Fill from package.json once it exists: run watcher/indexer, run web (Vite), run CLI, test/typecheck/lint.]
+Backend/CLI (root `package.json`):
+- `npm test` — run the vitest suite. `npm run typecheck` — `tsc --noEmit`. `npm run build` — compile to `dist/`.
+- `node dist/cli/cli.js <query>` — search. `... show <sessionId>` — print a transcript.
+  `... index` — one-shot backfill + drain embed queue. `... watch` — watch + keep indexing.
+  `... status` — queue progress. `... serve [--port N] [--watch]` — HTTP API + web app.
+  (After `npm link` or via the `agent-search` bin once installed.)
+Web (`web/package.json`): `npm run web:dev` — Vite dev server. `npm run web:build` — build to `web/dist/`.
+Prereq: ollama running with `nomic-embed-text` pulled (local embeddings).
 
 ## Scaffold Growth
 After meaningful work, run GROW:
