@@ -20,16 +20,15 @@ import type { EmbedWorker } from './indexer.js';
 
 // --------------------------------------------------------------------------- defaults
 
-const DEFAULT_DIRS = [
-  '~/.claude/projects',
-  '~/.codex/sessions',
-  '~/.pi/agent/sessions',
-].map((d) => d.replace('~', homedir()));
-
-function resolveDirs(): string[] {
+/**
+ * Resolve the dirs to watch. The default is each adapter's own `rootDir` — so
+ * adding an adapter automatically extends what the watcher covers, and no agent
+ * path is hardcoded outside the adapters. AGENT_SEARCH_DIRS overrides this.
+ */
+function resolveDirs(registry: Registry): string[] {
   const env = process.env.AGENT_SEARCH_DIRS;
   if (env) return env.split(':').map((d) => d.replace('~', homedir()));
-  return DEFAULT_DIRS;
+  return registry.adapters.map((a) => a.rootDir);
 }
 
 // --------------------------------------------------------------------------- options
@@ -81,7 +80,7 @@ export class Watcher {
     private readonly embedWorker: EmbedWorker,
     opts?: WatcherOptions,
   ) {
-    this.dirs = opts?.dirs ?? resolveDirs();
+    this.dirs = opts?.dirs ?? resolveDirs(registry);
     this.awaitWriteFinishOpt =
       opts?.awaitWriteFinish !== undefined
         ? opts.awaitWriteFinish

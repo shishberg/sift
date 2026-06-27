@@ -280,8 +280,8 @@ describe('OpenCodeSource', () => {
 
     const chunks = store.getSessionChunks('ses_8');
     expect(chunks).toHaveLength(1);
-    expect(chunks[0]!.toolCall?.args.length).toBeLessThanOrEqual(200);
-    expect(chunks[0]!.text.length).toBeLessThanOrEqual(500);
+    expect(chunks[0]!.toolCall?.args.length).toBeLessThanOrEqual(203); // 200 + '...'
+    expect(chunks[0]!.text.length).toBeLessThanOrEqual(503); // 500 + '...'
   });
 
   it('uses the part rowid as lineNumber (stable across re-runs)', () => {

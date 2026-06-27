@@ -213,6 +213,31 @@ describe('Watcher', () => {
     expect(stats.pending).toBe(0);
   });
 
+  it('defaults watched dirs to the adapter rootDirs when none are passed', async () => {
+    // No opts.dirs and no AGENT_SEARCH_DIRS → the watcher should derive dirs
+    // from the registry's adapter rootDirs (tmpDir here), not a hardcoded list.
+    const prevEnv = process.env.AGENT_SEARCH_DIRS;
+    delete process.env.AGENT_SEARCH_DIRS;
+    try {
+      const filePath = join(tmpDir, 'default-dirs.jsonl');
+      writeFileSync(
+        filePath,
+        JSON.stringify({ role: 'user', text: 'from adapter rootDir' }) + '\n',
+      );
+
+      watcher = new Watcher(store, fakeRegistry(tmpDir), embedWorker);
+      watcher.start();
+      await watcher.awaitBackfillEnqueued();
+      await embedWorker.awaitIdle();
+
+      const chunks = store.getSessionChunks('watcher-session');
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0].text).toBe('from adapter rootDir');
+    } finally {
+      if (prevEnv !== undefined) process.env.AGENT_SEARCH_DIRS = prevEnv;
+    }
+  });
+
   it('stop() closes the watcher cleanly', async () => {
     watcher = new Watcher(store, fakeRegistry(tmpDir), embedWorker, { dirs: [tmpDir] });
     watcher.start();

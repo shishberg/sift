@@ -28,6 +28,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { Chunk } from '../types.js';
 import type { Store } from '../index/store.js';
+import { truncate, TOOL_ARGS_MAX, TOOL_RESULT_MAX } from '../text.js';
 
 // ---- public constants ----
 
@@ -40,11 +41,6 @@ export const DEFAULT_OPENCODE_DB_PATH = join(
 );
 
 const META_CURSOR_KEY = 'opencode_cursor';
-
-// ---- truncation limits (mirroring the JSONL adapter conventions) ----
-
-const TOOL_ARGS_MAX = 200;
-const TOOL_OUTPUT_MAX = 500;
 
 // ---- internal row shapes ----
 
@@ -60,12 +56,6 @@ interface PartRow {
 interface MessageRow {
   id: string;
   data: string;
-}
-
-// ---- helpers ----
-
-function truncate(s: string, max: number): string {
-  return s.length <= max ? s : s.slice(0, max);
 }
 
 // ---- OpenCodeSource ----
@@ -196,7 +186,7 @@ export class OpenCodeSource {
         const args = truncate(rawArgs, TOOL_ARGS_MAX);
 
         const rawOutput = typeof state?.output === 'string' ? state.output : '';
-        const text = truncate(rawOutput, TOOL_OUTPUT_MAX);
+        const text = truncate(rawOutput, TOOL_RESULT_MAX);
 
         chunks.push({
           agentType: 'opencode',

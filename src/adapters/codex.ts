@@ -2,14 +2,7 @@ import os from 'os';
 import path from 'path';
 import type { Chunk } from '../types.js';
 import type { Adapter, ParseCtx } from './types.js';
-
-const TOOL_ARGS_MAX = 200;
-const TOOL_RESULT_MAX = 500;
-
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max) + '...';
-}
+import { truncate, TOOL_ARGS_MAX, TOOL_RESULT_MAX } from '../text.js';
 
 /**
  * Derive the codex session id from the filename.
