@@ -66,13 +66,17 @@ can't trace back to a session is a bug.
 
 ## Interfaces (both read-only)
 - **CLI:** agent-facing. Prints results with session ids. Default text format is
-  a two-line block per result: a header (session id, agent, file:line, role, cwd
+  a two-line block per result: a header (`sessionId:line`, agent, role, cwd
   home-relative, datetime via `formatTimestamp` — same format as the web UI) then
   the snippet on its own indented line, whitespace/newlines squashed, blank line
-  between results. The header is ANSI-coloured when stdout is a TTY (agent
-  colour-coded; honours `NO_COLOR`); piped/non-TTY output stays plain. `--format
-  json` dumps the raw `SearchResult[]` (full ISO timestamps, absolute cwd) for
-  machine use. `--help` must explain how to read a transcript from an id
+  between results. The locator is `sessionId:lineNumber` — the redundant filename
+  is dropped (the id IS the filename minus extension; `show <id>` resolves the
+  file). The cwd is omitted when the search is scoped to one directory (default /
+  `--cwd`), shown only under `--all`. The header is ANSI-coloured when stdout is a
+  TTY (agent colour-coded; honours `NO_COLOR`); piped/non-TTY output stays plain.
+  `--format json` dumps the raw `SearchResult[]` (full ISO timestamps, absolute
+  cwd) for machine use. `show` uses the same role colouring and a blank line
+  between messages. `--help` must explain how to read a transcript from an id
   (messages only by default). Search is scoped to the current directory by
   default (`--all` / `--cwd PATH` to change); text mode prints the active scope
   to stderr. See `patterns/add-cli-command.md`.

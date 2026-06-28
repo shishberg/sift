@@ -9,7 +9,7 @@
 
 import { fileURLToPath } from 'node:url';
 import { realpathSync, existsSync, readFileSync } from 'node:fs';
-import { basename, resolve, join } from 'node:path';
+import { resolve, join } from 'node:path';
 import { homedir } from 'node:os';
 import { readTranscript } from '../render/transcript.js';
 import type { Chunk } from '../types.js';
@@ -42,9 +42,9 @@ USAGE
 COMMANDS
   <query>
       Search indexed sessions. Prints ranked results — each result shows a
-      header (session id, agent type, file:line, role, datetime, working dir)
-      with the matching snippet on the line below. Use --format json for the
-      raw result objects (full ISO timestamps) instead.
+      header (session id:line, agent type, role, datetime, working dir) with
+      the matching snippet on the line below. Use --format json for the raw
+      result objects (full ISO timestamps) instead.
 
       By default the search is scoped to the current working directory — only
       sessions that ran there are searched. Pass --all to search every indexed
@@ -226,29 +226,38 @@ export function formatTimestamp(iso: string, now: Date = new Date()): string {
  * whitespace (including newlines) squashed to single spaces so each result
  * stays compact and readable. Long snippets are truncated with an ellipsis.
  *
- *   test-session-id  [claude] session.jsonl:10  [user]  src/y  28 Jun 13:25
+ *   test-session-id:10  [claude]  [user]  src/y  28 Jun 13:25
  *     the snippet text, newlines squashed
  *
- * @param opts.color  Wrap header fields in ANSI colour (default off, so piped
- *                    / non-TTY output stays plain). The snippet body is never
- *                    coloured.
+ * @param opts.color    Wrap header fields in ANSI colour (default off, so piped
+ *                      / non-TTY output stays plain). The snippet body is never
+ *                      coloured.
+ * @param opts.showCwd  Include the working directory in the header (default on).
+ *                      Off when the search is scoped to a single directory.
  */
-export function formatResult(r: SearchResult, opts: { color?: boolean } = {}): string {
+export function formatResult(
+  r: SearchResult,
+  opts: { color?: boolean; showCwd?: boolean } = {},
+): string {
   const color = opts.color ?? false;
+  const showCwd = opts.showCwd ?? true;
   const paint = (s: string, code: string): string =>
     color ? `${code}${s}${ANSI.reset}` : s;
 
-  const file = basename(r.filePath);
-  const loc = `${file}:${r.lineNumber}`;
+  // The session id IS the filename (minus extension) for our locators, so we
+  // skip the redundant filename and append the line number directly to the id —
+  // `id:line`, the same path:line shape every dev tool uses. `show <id>` resolves
+  // the actual file from the index, so nothing is lost.
+  const loc = `${r.sessionId}:${r.lineNumber}`;
 
   const headerParts = [
-    paint(r.sessionId, ANSI.dim),
+    paint(loc, ANSI.dim),
     paint(`[${r.agentType}]`, ANSI.bold + agentColor(r.agentType)),
-    paint(loc, ANSI.cyan),
     paint(`[${r.role}]`, roleColor(r.role)),
   ];
-  // Working dir then datetime last, matching the web UI ordering.
-  const cwd = homeRelative(r.cwd, homedir());
+  // Working dir then datetime last, matching the web UI ordering. Omitted when
+  // the search is already scoped to one directory (the scope note covers it).
+  const cwd = showCwd ? homeRelative(r.cwd, homedir()) : '';
   if (cwd) headerParts.push(paint(cwd, ANSI.dim));
   const when = formatTimestamp(r.timestamp);
   if (when) headerParts.push(paint(when, ANSI.dim));
@@ -283,7 +292,13 @@ export async function cmdSearch(
   deps: {
     searchFn: (q: string, opts?: { limit?: number }) => Promise<SearchResult[]>;
   },
-  opts: { limit?: number; format?: 'text' | 'json'; color?: boolean; write: (s: string) => void },
+  opts: {
+    limit?: number;
+    format?: 'text' | 'json';
+    color?: boolean;
+    showCwd?: boolean;
+    write: (s: string) => void;
+  },
 ): Promise<void> {
   const results = await deps.searchFn(query, { limit: opts.limit });
 
@@ -300,7 +315,7 @@ export async function cmdSearch(
   // A blank line between results keeps them visually separated.
   results.forEach((r, i) => {
     if (i > 0) opts.write('');
-    opts.write(formatResult(r, { color: opts.color }));
+    opts.write(formatResult(r, { color: opts.color, showCwd: opts.showCwd }));
   });
 }
 
@@ -319,10 +334,13 @@ export async function cmdSearch(
 export function cmdShow(
   sessionId: string,
   deps: { getSessionChunks: (id: string) => Chunk[] },
-  opts: { showTools?: boolean; write: (s: string) => void },
+  opts: { showTools?: boolean; color?: boolean; write: (s: string) => void },
 ): void {
   const { write } = opts;
   const showTools = opts.showTools ?? false;
+  const color = opts.color ?? false;
+  const paint = (s: string, code: string): string =>
+    color ? `${code}${s}${ANSI.reset}` : s;
 
   const chunks = deps.getSessionChunks(sessionId);
 
@@ -339,8 +357,11 @@ export function cmdShow(
 
     // Print a file header whenever we encounter a new source file.
     if (chunk.filePath !== lastFile) {
-      write(`\n--- ${chunk.filePath} ---`);
+      write(paint(`\n--- ${chunk.filePath} ---`, ANSI.dim));
       lastFile = chunk.filePath;
+    } else if (visibleCount > 0) {
+      // Blank line between messages (same colouring scheme as search results).
+      write('');
     }
 
     const text =
@@ -350,7 +371,7 @@ export function cmdShow(
           ? `${chunk.toolCall.name}(${chunk.toolCall.args})`
           : '';
 
-    write(`[${chunk.role}] ${text}`);
+    write(`${paint(`[${chunk.role}]`, roleColor(chunk.role))} ${text}`);
     visibleCount++;
   }
 
@@ -763,7 +784,15 @@ async function main(): Promise<void> {
       await cmdSearch(
         parsed.query,
         { searchFn: (q, opts) => search(q, { store, embedder }, { ...opts, cwd: cwdFilter }) },
-        { limit: parsed.limit, format, color, write: (s) => console.log(s) },
+        {
+          limit: parsed.limit,
+          format,
+          color,
+          // When scoped to one directory, every result shares that cwd (and the
+          // scope note above already states it) — so only show it under --all.
+          showCwd: !cwdFilter,
+          write: (s) => console.log(s),
+        },
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -787,10 +816,11 @@ async function main(): Promise<void> {
 
     const store = new Store();
     try {
+      const color = (process.stdout.isTTY ?? false) && !process.env.NO_COLOR;
       cmdShow(
         parsed.sessionId,
         { getSessionChunks: (id) => store.getSessionChunks(id) },
-        { showTools: parsed.showTools, write: (s) => console.log(s) },
+        { showTools: parsed.showTools, color, write: (s) => console.log(s) },
       );
     } finally {
       store.close();

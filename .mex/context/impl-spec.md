@@ -210,14 +210,18 @@ A **single-flight** in-process consumer drains them:
 No framework: arg parsing is hand-rolled in `parseCli`, help is the `HELP_TEXT`
 constant, and each command is a pure `cmd*` handler taking injected deps; `main()`
 wires them. (Both in `cli/cli.ts`.)
-- `agent-search <query> [--limit N] [--format text|json]` → ranked results. Text =
-  a two-line block per result: header (`sessionId  [agent]  file:line  [role]  cwd
-  datetime`, cwd $HOME-relative, datetime via `formatTimestamp`) then the snippet on
-  its own indented line (whitespace squashed), blank line between. Header is ANSI-
-  coloured only on a TTY (honours `NO_COLOR`). `--format json` dumps the raw
-  `SearchResult[]` (full ISO timestamps, absolute cwd).
+- `agent-search <query> [--limit N] [--format text|json] [--cwd PATH | --all]` →
+  ranked results. Text = a two-line block per result: header
+  (`sessionId:line  [agent]  [role]  cwd  datetime`, cwd $HOME-relative, datetime via
+  `formatTimestamp`) then the snippet on its own indented line (whitespace squashed),
+  blank line between. The locator is `sessionId:lineNumber` (the redundant filename is
+  dropped; `show <id>` resolves the file). cwd is shown only under `--all` — when the
+  search is scoped to one directory it's omitted (the scope note on stderr covers it).
+  Header is ANSI-coloured only on a TTY (honours `NO_COLOR`). `--format json` dumps the
+  raw `SearchResult[]` (full ISO timestamps, absolute cwd).
 - `agent-search show <sessionId> [--tools]` → print the transcript (user/assistant by
-  default; `--tools` includes tool chunks). `--help` explains result → transcript.
+  default; `--tools` includes tool chunks). Role marker is ANSI-coloured on a TTY (same
+  scheme as search), blank line between messages. `--help` explains result → transcript.
 - `agent-search index` → one-shot: scan all dirs + opencode, write rows, drain the
   embed queue to completion (live progress bar), then exit. `agent-search watch` →
   watch + keep draining. `agent-search status` → print `queueStats` + a text bar.

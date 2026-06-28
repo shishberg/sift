@@ -96,11 +96,16 @@ describe('formatResult', () => {
     expect(line).toContain('sess-abc123');
   });
 
-  it('includes file:line from the source locator', () => {
+  it('appends the line number to the session id, dropping the redundant filename', () => {
     const line = formatResult(
-      makeSearchResult({ filePath: '/logs/session.jsonl', lineNumber: 42 }),
+      makeSearchResult({
+        sessionId: 'sess-abc',
+        filePath: '/logs/session.jsonl',
+        lineNumber: 42,
+      }),
     );
-    expect(line).toContain('session.jsonl:42');
+    expect(line).toContain('sess-abc:42');
+    expect(line).not.toContain('session.jsonl');
   });
 
   it('includes the role', () => {
@@ -165,6 +170,14 @@ describe('formatResult', () => {
     expect(line).not.toContain(homedir());
   });
 
+  it('omits the working directory when showCwd is false', () => {
+    const line = formatResult(
+      makeSearchResult({ cwd: `${homedir()}/src/proj` }),
+      { showCwd: false },
+    );
+    expect(line).not.toContain('src/proj');
+  });
+
   it('includes a human-readable datetime in the header', () => {
     const line = formatResult(
       makeSearchResult({ timestamp: '2020-03-15T10:30:00Z' }),
@@ -213,7 +226,7 @@ describe('formatTimestamp', () => {
 // ---------------------------------------------------------------------------
 
 describe('cmdSearch', () => {
-  it('prints each result including session id and file:line', async () => {
+  it('prints each result with the session id and line number locator', async () => {
     const lines: string[] = [];
     const results: SearchResult[] = [
       makeSearchResult({
@@ -229,8 +242,20 @@ describe('cmdSearch', () => {
     );
 
     const output = lines.join('\n');
-    expect(output).toContain('sess-xyz');
-    expect(output).toContain('a.jsonl:7');
+    expect(output).toContain('sess-xyz:7');
+  });
+
+  it('omits the working directory in text mode when showCwd is false', async () => {
+    const lines: string[] = [];
+    const results: SearchResult[] = [
+      makeSearchResult({ sessionId: 'sess-a', cwd: `${homedir()}/src/proj` }),
+    ];
+    await cmdSearch(
+      'query',
+      { searchFn: async () => results },
+      { showCwd: false, write: (s) => lines.push(s) },
+    );
+    expect(lines.join('\n')).not.toContain('src/proj');
   });
 
   it('passes the limit option through to the search function', async () => {
@@ -434,6 +459,51 @@ describe('cmdShow', () => {
 
     const output = lines.join('\n');
     expect(output).toMatch(/no chunks|not found/i);
+  });
+
+  it('emits no ANSI escape codes by default', () => {
+    const lines: string[] = [];
+    cmdShow(
+      'sess1',
+      {
+        getSessionChunks: () => [
+          makeChunk({ role: 'user', text: 'hello', filePath: '/f.jsonl' }),
+        ],
+      },
+      { write: (s) => lines.push(s) },
+    );
+    expect(lines.join('\n')).not.toContain('\x1b[');
+  });
+
+  it('colours the role marker when color is enabled, leaving the body readable', () => {
+    const lines: string[] = [];
+    cmdShow(
+      'sess1',
+      {
+        getSessionChunks: () => [
+          makeChunk({ role: 'user', text: 'hello body', filePath: '/f.jsonl' }),
+        ],
+      },
+      { color: true, write: (s) => lines.push(s) },
+    );
+    const output = lines.join('\n');
+    expect(output).toContain('\x1b['); // some ANSI colour present
+    expect(output).toContain('hello body'); // body text still recoverable
+  });
+
+  it('separates messages with a blank line', () => {
+    const lines: string[] = [];
+    cmdShow(
+      'sess1',
+      {
+        getSessionChunks: () => [
+          makeChunk({ role: 'user', text: 'first', filePath: '/f.jsonl' }),
+          makeChunk({ role: 'assistant', text: 'second', filePath: '/f.jsonl' }),
+        ],
+      },
+      { write: (s) => lines.push(s) },
+    );
+    expect(lines.join('\n')).toContain('\n\n');
   });
 });
 

@@ -42,11 +42,16 @@ wiring layer. Follow that shape for new commands.
    `main()` and exit non-zero with a friendly message.
 
 ## Output conventions (search, `formatResult`)
-- Text result = a two-line block: a header (`sessionId  [agent]  file:line
-  [role]  cwd  datetime`, cwd home-relative, datetime via `formatTimestamp`) then
-  the snippet on its own indented line, whitespace squashed, blank line between.
+- Text result = a two-line block: a header (`sessionId:line  [agent]  [role]  cwd
+  datetime`, cwd home-relative, datetime via `formatTimestamp`) then the snippet
+  on its own indented line, whitespace squashed, blank line between.
+- Locator is `sessionId:lineNumber` — no filename (the id IS the filename minus
+  extension; `show <id>` resolves the actual file from the index).
+- cwd is shown only under `--all`; when scoped to one directory (default / `--cwd`)
+  it's omitted, since the stderr scope note already states it (`showCwd` opt).
 - Header is ANSI-coloured only when `process.stdout.isTTY` and `NO_COLOR` is
-  unset; piped / `--format json` output stays plain.
+  unset; piped / `--format json` output stays plain. `cmdShow` uses the same role
+  colouring and a blank line between messages.
 - `--format json` dumps the raw objects (full ISO timestamps, absolute cwd).
 
 ## Gotchas
