@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, nextTick, computed, ref } from 'vue';
 import { useRoute } from 'vue-router';
-import type { SessionResponse, Chunk } from '@/types';
+import type { SessionResponse, TranscriptItem } from '@/types';
 import { renderMarkdown } from '@/lib/markdown';
 import { sessionHeader, resetSessionHeader } from '@/lib/sessionHeader';
+import { Message, MessageContent } from '@/components/ai-elements/message';
+import { Tool, ToolHeader, ToolContent, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
 
 const route = useRoute();
 
@@ -18,8 +20,6 @@ const error = ref('');
 async function loadSession(): Promise<void> {
   loading.value = true;
   error.value = '';
-  // Light up the global-header controls right away (back + id) so the user can
-  // leave even while the transcript is still loading.
   resetSessionHeader();
   sessionHeader.active = true;
   sessionHeader.sessionId = sessionId.value;
@@ -32,12 +32,9 @@ async function loadSession(): Promise<void> {
       return;
     }
     session.value = (await res.json()) as SessionResponse;
-    sessionHeader.agentType = session.value.chunks[0]?.agentType ?? null;
+    sessionHeader.agentType = session.value.agentType;
     sessionHeader.filePath = session.value.filePath;
     sessionHeader.cwd = session.value.cwd;
-    sessionHeader.canToggleTools = true;
-    // Must set loading = false BEFORE nextTick so the v-if="!loading && session"
-    // block renders the chunks into the DOM before scrollToMatch queries for them.
     loading.value = false;
     await nextTick();
     scrollToMatch();
@@ -47,49 +44,21 @@ async function loadSession(): Promise<void> {
   }
 }
 
-function isMatch(chunk: Chunk): boolean {
-  return chunk.lineNumber === matchLine.value && chunk.filePath === matchFile.value;
+function isMatch(item: TranscriptItem): boolean {
+  return item.filePath === matchFile.value && item.lineNumbers.includes(matchLine.value);
 }
 
 function scrollToMatch(): void {
   const el = document.querySelector('[data-matched]') as HTMLElement | null;
-  if (el) {
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
-function visibleChunks(chunks: Chunk[]): Chunk[] {
-  if (sessionHeader.showTools) return chunks;
-  return chunks.filter((c) => c.role !== 'tool');
+function renderedHtml(text: string): string {
+  return renderMarkdown(text);
 }
 
-function chunkText(chunk: Chunk): string {
-  if (chunk.text) return chunk.text;
-  if (chunk.toolCall) return chunk.toolCall.name + '(' + chunk.toolCall.args + ')';
-  return '(empty)';
-}
-
-function msgClass(chunk: Chunk): string {
-  if (chunk.role === 'user') return 'msg msg-user';
-  if (chunk.role === 'assistant') return 'msg msg-assistant';
-  return '';
-}
-
-// User/assistant text is rendered as markdown; tool chunks stay as plain
-// monospace (they're name(args) or raw output, not prose).
-function renderedHtml(chunk: Chunk): string {
-  return renderMarkdown(chunk.text);
-}
-
-function isProse(chunk: Chunk): boolean {
-  return chunk.role !== 'tool' && Boolean(chunk.text);
-}
-
-function roleLabel(chunk: Chunk): string {
-  if (chunk.role === 'tool' && chunk.toolCall) {
-    return 'tool:' + chunk.toolCall.name;
-  }
-  return chunk.role;
+function itemKey(item: TranscriptItem): string {
+  return item.filePath + ':' + item.lineNumbers.join('-');
 }
 
 onMounted(() => {
@@ -103,18 +72,10 @@ onUnmounted(() => {
 
 <template>
   <div style="max-width: 760px; margin: 0 auto; padding: 28px 24px 48px">
-    <!-- The session controls (back / id / filename / hide-tools) live in the
-         global header (App.vue) via the shared sessionHeader store. -->
-
-    <!-- Loading -->
-    <div
-      v-if="loading"
-      style="color: var(--muted-fg); font-size: 14px; padding-top: 32px; text-align: center"
-    >
+    <div v-if="loading" style="color: var(--muted-fg); font-size: 14px; padding-top: 32px; text-align: center">
       Loading…
     </div>
 
-    <!-- Error -->
     <div
       v-if="error"
       class="rounded-md px-4 py-3"
@@ -123,62 +84,41 @@ onUnmounted(() => {
       {{ error }}
     </div>
 
-    <!-- Transcript -->
-    <div v-if="!loading && !error && session" class="flex flex-col" style="gap: 20px">
-      <template
-        v-for="chunk in visibleChunks(session.chunks)"
-        :key="chunk.filePath + ':' + chunk.lineNumber"
-      >
+    <div v-if="!loading && !error && session" class="flex flex-col" style="gap: 16px">
+      <template v-for="item in session.items" :key="itemKey(item)">
+        <!-- Tool call -->
         <div
-          :data-matched="isMatch(chunk) ? '' : undefined"
-          :class="[msgClass(chunk), isMatch(chunk) ? 'chunk-matched' : '']"
+          v-if="item.role === 'tool'"
+          :data-matched="isMatch(item) ? '' : undefined"
+          :class="['transcript-row', isMatch(item) ? 'chunk-matched' : '']"
         >
-          <!-- Role rule -->
-          <div class="role-rule">
-            <span
-              class="role-label"
-              :style="chunk.role === 'tool' ? 'color: var(--muted-fg)' : ''"
-            >{{ roleLabel(chunk) }}</span>
-            <div class="rule-line"></div>
-            <span
-              class="font-mono flex-shrink-0"
-              style="font-size: 10px; color: var(--border); letter-spacing: 0.02em"
-            >:{{ chunk.lineNumber }}</span>
-          </div>
+          <Tool>
+            <ToolHeader :name="item.tool?.name ?? 'tool'" :is-error="item.tool?.isError" />
+            <ToolContent>
+              <ToolInput v-if="item.tool?.input" :input="item.tool.input" />
+              <ToolOutput :output="item.tool?.output" :is-error="item.tool?.isError" />
+            </ToolContent>
+          </Tool>
+          <span class="line-label">:{{ item.lineNumbers[0] }}</span>
+        </div>
 
-          <!-- Message text: markdown for prose, plain mono for tools -->
-          <div v-if="isProse(chunk)" class="md-body" v-html="renderedHtml(chunk)"></div>
-          <div
-            v-else
-            style="
-              font-family: 'JetBrains Mono', ui-monospace, monospace;
-              font-size: 12px;
-              color: var(--muted-fg);
-              white-space: pre-wrap;
-              word-break: break-word;
-            "
-          >{{ chunkText(chunk) }}</div>
+        <!-- User / assistant message -->
+        <div
+          v-else
+          :data-matched="isMatch(item) ? '' : undefined"
+          :class="['transcript-row', isMatch(item) ? 'chunk-matched' : '']"
+        >
+          <Message :from="item.role">
+            <MessageContent>
+              <div class="md-body" v-html="renderedHtml(item.text)"></div>
+            </MessageContent>
+          </Message>
+          <span class="line-label" :class="item.role === 'user' ? 'line-label-right' : ''">:{{ item.lineNumbers[0] }}</span>
         </div>
       </template>
 
-      <!-- All tools hidden -->
-      <div
-        v-if="visibleChunks(session.chunks).length === 0"
-        style="color: var(--muted-fg); font-size: 14px"
-      >
-        This session only has tool calls.
-        <button
-          style="
-            background: none;
-            border: none;
-            color: var(--violet);
-            cursor: pointer;
-            padding: 0;
-            font-size: 14px;
-            text-decoration: underline;
-          "
-          @click="sessionHeader.showTools = true"
-        >Show them</button>.
+      <div v-if="session.items.length === 0" style="color: var(--muted-fg); font-size: 14px">
+        This session has no readable messages.
       </div>
     </div>
   </div>
