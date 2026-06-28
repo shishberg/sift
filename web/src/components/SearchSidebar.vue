@@ -138,8 +138,9 @@ function agentBadgeClass(agentType: string): string {
   return 'badge badge-role';
 }
 
-// "13:25 - 28 Jun 2026", dropping the day & month when it's today and the year
-// when it's this year (so today → "13:25", this year → "13:25 - 28 Jun").
+// "28 Jun 2026 13:25" — time last so it stays flush right. Drops the day &
+// month when it's today and the year when it's this year (today → "13:25",
+// this year → "28 Jun 13:25").
 function formatResultTime(iso: string): string {
   if (!iso) return '';
   const d = new Date(iso);
@@ -152,8 +153,8 @@ function formatResultTime(iso: string): string {
     d.getFullYear() === now.getFullYear();
   if (sameDay) return time;
   const dayMonth = `${d.getDate()} ${d.toLocaleString('en-US', { month: 'short' })}`;
-  const sameYear = d.getFullYear() === now.getFullYear();
-  return sameYear ? `${time} - ${dayMonth}` : `${time} - ${dayMonth} ${d.getFullYear()}`;
+  const datePart = d.getFullYear() === now.getFullYear() ? dayMonth : `${dayMonth} ${d.getFullYear()}`;
+  return `${datePart} ${time}`;
 }
 
 const resultCount = computed(() => results.value.length);
