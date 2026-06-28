@@ -26,7 +26,7 @@
 import Database from 'better-sqlite3';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { Chunk } from '../types.js';
+import type { Chunk, TranscriptItem } from '../types.js';
 import type { Store } from '../index/store.js';
 import { truncate, TOOL_ARGS_MAX, TOOL_RESULT_MAX } from '../text.js';
 
@@ -284,5 +284,72 @@ export class OpenCodeSource {
     });
 
     return chunks.length;
+  }
+
+  /**
+   * Faithful transcript for one session, read from opencode's DB. Unlike the
+   * lossy `index()` path, text and tool output are untruncated. Each tool part
+   * already carries input + output in `state`, so no pairing is needed.
+   */
+  readTranscript(sessionId: string): TranscriptItem[] {
+    const parts = this.db
+      .prepare(
+        `SELECT rowid, message_id, time_created, data
+         FROM   part
+         WHERE  session_id = ?
+         ORDER  BY rowid`,
+      )
+      .all(sessionId) as Array<{ rowid: number; message_id: string; time_created: number; data: string }>;
+    if (parts.length === 0) return [];
+
+    const messageIds = [...new Set(parts.map((p) => p.message_id))];
+    const placeholders = messageIds.map(() => '?').join(',');
+    const messages = this.db
+      .prepare(`SELECT id, data FROM message WHERE id IN (${placeholders})`)
+      .all(...messageIds) as Array<{ id: string; data: string }>;
+    const roleByMessageId = new Map<string, 'user' | 'assistant'>();
+    for (const msg of messages) {
+      try {
+        const parsed = JSON.parse(msg.data) as { role?: string };
+        if (parsed.role === 'user' || parsed.role === 'assistant') roleByMessageId.set(msg.id, parsed.role);
+      } catch {
+        // skip
+      }
+    }
+
+    const filePath = `opencode://${sessionId}`;
+    const items: TranscriptItem[] = [];
+    for (const part of parts) {
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(part.data) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      const type = typeof parsed['type'] === 'string' ? (parsed['type'] as string) : undefined;
+      if (!type) continue;
+      let timestamp = '';
+      try {
+        timestamp = new Date(part.time_created).toISOString();
+      } catch {
+        timestamp = '';
+      }
+      const role = roleByMessageId.get(part.message_id) ?? 'assistant';
+
+      if (type === 'text') {
+        const text = typeof parsed['text'] === 'string' ? (parsed['text'] as string) : '';
+        if (text) items.push({ role, text, filePath, lineNumbers: [part.rowid], timestamp });
+      } else if (type === 'tool') {
+        const name = typeof parsed['tool'] === 'string' ? (parsed['tool'] as string) : '';
+        if (!name) continue;
+        const state = parsed['state'] as { input?: unknown; output?: unknown; status?: unknown } | undefined;
+        const input = state?.input !== undefined ? JSON.stringify(state.input) : '';
+        const output =
+          typeof state?.output === 'string' ? state.output : state?.output !== undefined ? JSON.stringify(state.output) : undefined;
+        const isError = state?.status === 'error';
+        items.push({ role: 'tool', text: '', tool: { name, input, output, isError }, filePath, lineNumbers: [part.rowid], timestamp });
+      }
+    }
+    return items;
   }
 }

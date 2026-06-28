@@ -410,4 +410,29 @@ describe('OpenCodeSource', () => {
     const count2 = source.index(store);
     expect(count2).toBe(0);
   });
+
+  describe('readTranscript', () => {
+    it('returns text and tool items (input+output) in rowid order', () => {
+      // Uses the existing fixtureDb from beforeEach (fresh per test).
+      insertMessage(fixtureDb, { id: 'm1', sessionId: 's1', role: 'assistant' });
+      insertPart(fixtureDb, {
+        id: 'prt_t1',
+        messageId: 'm1',
+        sessionId: 's1',
+        data: { type: 'text', text: 'hi' },
+      });
+      insertPart(fixtureDb, {
+        id: 'prt_t2',
+        messageId: 'm1',
+        sessionId: 's1',
+        data: { type: 'tool', tool: 'bash', state: { input: { cmd: 'ls' }, output: 'a\nb' } },
+      });
+      const source = new OpenCodeSource(fixtureDb);
+      const items = source.readTranscript('s1');
+      expect(items.map((i) => i.role)).toEqual(['assistant', 'tool']);
+      expect(items[0]).toMatchObject({ text: 'hi', filePath: 'opencode://s1', lineNumbers: [1] });
+      expect(items[1]!.tool).toEqual({ name: 'bash', input: '{"cmd":"ls"}', output: 'a\nb', isError: false });
+      expect(items[1]!.lineNumbers).toEqual([2]);
+    });
+  });
 });
