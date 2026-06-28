@@ -28,6 +28,8 @@ export interface SessionResponse {
   sessionId: string;
   /** First file path seen in this session's chunks (may be '' if no chunks). */
   filePath: string;
+  /** Working directory the session ran in; '' if not recorded. */
+  cwd: string;
   chunks: Chunk[];
 }
 

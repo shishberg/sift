@@ -12,6 +12,7 @@
  *    into at most one additional pass.
  */
 
+import { openSync, readSync, closeSync } from 'node:fs';
 import { tailFile } from './tail.js';
 import type { Store } from '../index/store.js';
 import type { Registry } from '../adapters/types.js';
@@ -70,7 +71,82 @@ export async function indexFile(
     store.addChunks(chunks.map((chunk) => ({ chunk })));
   }
 
+  // Capture the working directory once. It's recorded on a metadata line that
+  // may not itself produce a chunk (codex/pi), so scan the raw lines — not just
+  // the parsed chunks. Skip if we already have it for this file.
+  if (!prior?.cwd) {
+    for (const line of result.lines) {
+      const cwd = adapter.extractCwd(line.text);
+      if (cwd) {
+        store.setSourceFileCwd(filePath, cwd, adapter.agentType);
+        break;
+      }
+    }
+  }
+
   return chunks.length;
+}
+
+// --------------------------------------------------------------------------- backfillCwd
+
+/** Read up to `maxBytes` from the start of a file as complete lines. */
+function readHeadLines(filePath: string, maxBytes = 1_000_000): string[] {
+  const fd = openSync(filePath, 'r');
+  try {
+    const buf = Buffer.alloc(maxBytes);
+    const bytes = readSync(fd, buf, 0, maxBytes, 0);
+    const lines = buf.toString('utf8', 0, bytes).split('\n');
+    // If we filled the buffer we may have cut a line in half — drop the tail.
+    if (bytes === maxBytes) lines.pop();
+    return lines;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * One-time backfill of the `cwd` column for data indexed before it existed.
+ *
+ * The incremental tail never re-reads old lines, so existing source files keep
+ * a null cwd. This reads the head of each such file, extracts the working
+ * directory via the matching adapter, and records it. opencode (which has no
+ * JSONL files) is handled by its source's own backfill, if provided.
+ *
+ * @returns the number of cwds newly recorded.
+ */
+export async function backfillCwd(
+  store: Store,
+  registry: Registry,
+  opencodeSource?: { backfillCwd(store: Store): number },
+): Promise<number> {
+  let filled = 0;
+
+  for (const { path: filePath } of store.sourceFilesMissingCwd()) {
+    const adapter = registry.forFile(filePath);
+    if (!adapter) continue;
+
+    let cwd: string | undefined;
+    try {
+      for (const line of readHeadLines(filePath)) {
+        const c = adapter.extractCwd(line);
+        if (c) {
+          cwd = c;
+          break;
+        }
+      }
+    } catch {
+      continue; // file missing or unreadable — skip it
+    }
+
+    if (cwd) {
+      store.setSourceFileCwd(filePath, cwd, adapter.agentType);
+      filled++;
+    }
+  }
+
+  if (opencodeSource) filled += opencodeSource.backfillCwd(store);
+
+  return filled;
 }
 
 // --------------------------------------------------------------------------- EmbedWorker

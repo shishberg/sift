@@ -244,3 +244,21 @@ describe('CodexAdapter', () => {
     });
   });
 });
+
+describe('CodexAdapter.extractCwd', () => {
+  const adapter = new CodexAdapter();
+
+  it('returns cwd from the session_meta payload', () => {
+    expect(adapter.extractCwd(SESSION_META_LINE)).toBe(
+      '/Users/agent/src/MezzaNexus/.claude/worktrees/nx91-party-travel',
+    );
+  });
+
+  it('returns undefined for a non-meta record', () => {
+    expect(adapter.extractCwd(EVENT_MSG_LINE)).toBeUndefined();
+  });
+
+  it('returns undefined for a non-JSON line', () => {
+    expect(adapter.extractCwd('not json')).toBeUndefined();
+  });
+});

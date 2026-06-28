@@ -59,6 +59,7 @@ const fakeResult: SearchResult = {
 const fakeSession: SessionResponse = {
   sessionId: 'ses-abc123',
   filePath: '/home/user/.claude/projects/foo/ses-abc123.jsonl',
+  cwd: '/home/user/src/foo',
   chunks: [fakeChunk],
 };
 
@@ -209,6 +210,7 @@ describe('GET /api/session/:id', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as SessionResponse;
     expect(body.sessionId).toBe('ses-abc123');
+    expect(body.cwd).toBe('/home/user/src/foo');
     expect(Array.isArray(body.chunks)).toBe(true);
     expect(body.chunks[0]?.role).toBe('user');
   });

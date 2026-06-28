@@ -260,3 +260,19 @@ describe('PiAdapter', () => {
     });
   });
 });
+
+describe('PiAdapter.extractCwd', () => {
+  const adapter = new PiAdapter();
+
+  it('returns cwd from the session record', () => {
+    expect(adapter.extractCwd(SESSION_LINE)).toBe('/Users/agent/src/agent-web');
+  });
+
+  it('returns undefined for a non-session record', () => {
+    expect(adapter.extractCwd(MODEL_CHANGE_LINE)).toBeUndefined();
+  });
+
+  it('returns undefined for a non-JSON line', () => {
+    expect(adapter.extractCwd('not json')).toBeUndefined();
+  });
+});

@@ -8,6 +8,7 @@ import {
   cmdIndex,
   HELP_TEXT,
   parseCli,
+  homeRelative,
 } from './cli.js';
 import type { SearchResult } from '../search/search.js';
 import type { Chunk } from '../types.js';
@@ -587,5 +588,23 @@ describe('cmdIndex', () => {
     );
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/mismatch|old-model/i);
+  });
+});
+
+describe('homeRelative', () => {
+  it('strips the home prefix to give a path relative to home', () => {
+    expect(homeRelative('/Users/agent/src/agent-search', '/Users/agent')).toBe('src/agent-search');
+  });
+
+  it('returns ~ when the path is exactly home', () => {
+    expect(homeRelative('/Users/agent', '/Users/agent')).toBe('~');
+  });
+
+  it('returns the absolute path unchanged when not under home', () => {
+    expect(homeRelative('/tmp/scratch', '/Users/agent')).toBe('/tmp/scratch');
+  });
+
+  it('returns empty string for empty input', () => {
+    expect(homeRelative('', '/Users/agent')).toBe('');
   });
 });

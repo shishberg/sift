@@ -35,6 +35,19 @@ export class CodexAdapter implements Adapter {
     return filePath.startsWith(this.rootDir + path.sep) || filePath.startsWith(this.rootDir + '/');
   }
 
+  // Codex records `cwd` once, in the session_meta record's payload (first line).
+  extractCwd(line: string): string | undefined {
+    try {
+      const record = JSON.parse(line) as Record<string, unknown>;
+      if (record['type'] !== 'session_meta') return undefined;
+      const payload = record['payload'] as Record<string, unknown> | undefined;
+      const cwd = payload?.['cwd'];
+      return typeof cwd === 'string' ? cwd : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   parseLine(line: string, ctx: ParseCtx): Chunk[] {
     const trimmed = line.trim();
     if (!trimmed) return [];

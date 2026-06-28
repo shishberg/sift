@@ -10,11 +10,12 @@
 import { fileURLToPath } from 'node:url';
 import { realpathSync, existsSync } from 'node:fs';
 import { basename } from 'node:path';
+import { homedir } from 'node:os';
 import { Store } from '../index/store.js';
 import { OllamaEmbedder } from '../embed/ollama.js';
 import { assertEmbedModel } from '../embed/guard.js';
 import { buildRegistry } from '../adapters/registry.js';
-import { EmbedWorker } from '../ingest/indexer.js';
+import { EmbedWorker, backfillCwd } from '../ingest/indexer.js';
 import { Watcher } from '../ingest/watcher.js';
 import { search, type SearchResult } from '../search/search.js';
 import { startServer, DEFAULT_PORT } from '../server/server.js';
@@ -124,6 +125,18 @@ const SNIPPET_DISPLAY_MAX = 120;
  * Format one search result as a single readable line.
  * Always includes: session id, agent type, file:line, role, snippet.
  */
+/**
+ * Render an absolute path relative to the home directory: `/Users/x/src/y` →
+ * `src/y`, home itself → `~`, paths outside home returned unchanged. Empty in,
+ * empty out.
+ */
+export function homeRelative(absPath: string, home: string): string {
+  if (!absPath) return '';
+  if (absPath === home) return '~';
+  if (absPath.startsWith(home + '/')) return absPath.slice(home.length + 1);
+  return absPath;
+}
+
 export function formatResult(r: SearchResult): string {
   const file = basename(r.filePath);
   const loc = `${file}:${r.lineNumber}`;
@@ -484,6 +497,35 @@ async function importOpencode(store: Store, write: (s: string) => void): Promise
   }
 }
 
+/**
+ * One-time backfill of the cwd column for data indexed before it existed.
+ * Cheap and self-limiting: only files with a null cwd are touched, so after the
+ * first run subsequent startups do almost nothing.
+ */
+async function runCwdBackfill(
+  store: Store,
+  registry: ReturnType<typeof buildRegistry>,
+  write: (s: string) => void,
+): Promise<void> {
+  let opencodeSource: OpenCodeSource | undefined;
+  if (existsSync(DEFAULT_OPENCODE_DB_PATH)) {
+    try {
+      opencodeSource = new OpenCodeSource(DEFAULT_OPENCODE_DB_PATH);
+    } catch {
+      opencodeSource = undefined;
+    }
+  }
+  try {
+    const filled = await backfillCwd(store, registry, opencodeSource);
+    if (filled > 0) write(`Backfilled working directory for ${filled} sessions.`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    write(`[warn] cwd backfill failed (skipped): ${msg}`);
+  } finally {
+    opencodeSource?.close();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Progress display for index / watch (used only by main())
 // ---------------------------------------------------------------------------
@@ -590,6 +632,8 @@ async function main(): Promise<void> {
       awaitWriteFinish: false,
     });
 
+    await runCwdBackfill(store, registry, (s) => console.log(s));
+
     const isTTY = process.stdout.isTTY ?? false;
 
     const result = await cmdIndex(
@@ -642,6 +686,10 @@ async function main(): Promise<void> {
       process.exit(1);
     }
 
+    // Fill cwd for anything indexed before the column existed, so the web UI
+    // can show the working directory on existing sessions.
+    await runCwdBackfill(store, buildRegistry(), (s) => console.log(s));
+
     let watcher: Watcher | undefined;
     let embedWorker: EmbedWorker | undefined;
 
@@ -662,6 +710,7 @@ async function main(): Promise<void> {
           return {
             sessionId,
             filePath: chunks[0]?.filePath ?? '',
+            cwd: homeRelative(store.getSessionCwd(sessionId) ?? '', homedir()),
             chunks,
           };
         },
@@ -726,6 +775,7 @@ async function main(): Promise<void> {
 
     // One-shot opencode pull at startup. Future: poll DB file mtime for live updates.
     await importOpencode(store, (s) => console.log(s));
+    await runCwdBackfill(store, registry, (s) => console.log(s));
 
     console.log('Watching agent log directories. Ctrl-C to stop.');
     watcher.start();

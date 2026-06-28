@@ -95,6 +95,61 @@ export class OpenCodeSource {
   }
 
   /**
+   * One-time backfill: record the working directory for every opencode session
+   * that has a directory. Idempotent. Used to populate cwd for sessions indexed
+   * before the cwd column existed. Sessions not present in the index simply get
+   * an unreferenced source_files row, which is harmless.
+   *
+   * @returns the number of cwds recorded.
+   */
+  backfillCwd(store: Store): number {
+    let rows: Array<{ id: string; directory: string | null }>;
+    try {
+      rows = this.db.prepare('SELECT id, directory FROM session').all() as Array<{
+        id: string;
+        directory: string | null;
+      }>;
+    } catch {
+      return 0; // schema drift — nothing to backfill
+    }
+
+    let n = 0;
+    store.runTransaction(() => {
+      for (const row of rows) {
+        if (typeof row.directory === 'string' && row.directory) {
+          store.setSourceFileCwd(`opencode://${row.id}`, row.directory, 'opencode');
+          n++;
+        }
+      }
+    });
+    return n;
+  }
+
+  /**
+   * Map session id → working directory from opencode's `session` table.
+   * Sessions with no row or a blank directory are omitted. Defensive against
+   * schema drift: a query error yields an empty map rather than failing ingest.
+   */
+  private directoriesForSessions(sessionIds: string[]): Map<string, string> {
+    const result = new Map<string, string>();
+    if (sessionIds.length === 0) return result;
+    try {
+      const placeholders = sessionIds.map(() => '?').join(',');
+      const rows = this.db
+        .prepare(`SELECT id, directory FROM session WHERE id IN (${placeholders})`)
+        .all(...sessionIds) as Array<{ id: string; directory: string | null }>;
+      for (const row of rows) {
+        if (typeof row.directory === 'string' && row.directory) {
+          result.set(row.id, row.directory);
+        }
+      }
+    } catch {
+      // opencode schema changed (no session.directory) — skip cwd, keep indexing.
+    }
+    return result;
+  }
+
+  /**
    * Read new parts from opencode (rowid > stored cursor), convert to Chunk[],
    * insert into the store, and advance the cursor.
    *
@@ -212,12 +267,18 @@ export class OpenCodeSource {
     // it produced an indexable chunk — we must advance past skipped rows too).
     const newCursor = parts[parts.length - 1]!.rowid;
 
+    // Working directory per session — opencode stores it directly on `session`.
+    const cwdBySession = this.directoriesForSessions([...new Set(parts.map((p) => p.session_id))]);
+
     // Insert chunks and update the cursor in a single atomic transaction.
     // If this instance is called within an existing transaction, better-sqlite3
     // promotes the inner call to a SAVEPOINT automatically.
     store.runTransaction(() => {
       if (chunks.length > 0) {
         store.addChunks(chunks.map((chunk) => ({ chunk })));
+      }
+      for (const [sessionId, directory] of cwdBySession) {
+        store.setSourceFileCwd(`opencode://${sessionId}`, directory, 'opencode');
       }
       store.setMeta(META_CURSOR_KEY, String(newCursor));
     });

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted, nextTick, computed } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { onMounted, onUnmounted, nextTick, computed, ref } from 'vue';
+import { useRoute } from 'vue-router';
 import type { SessionResponse, Chunk } from '@/types';
+import { renderMarkdown } from '@/lib/markdown';
+import { sessionHeader, resetSessionHeader } from '@/lib/sessionHeader';
 
 const route = useRoute();
-const router = useRouter();
 
 const sessionId = computed(() => route.params.id as string);
 const matchFile = computed(() => (route.query.file as string | undefined) ?? '');
@@ -13,11 +14,15 @@ const matchLine = computed(() => parseInt((route.query.line as string | undefine
 const session = ref<SessionResponse | null>(null);
 const loading = ref(true);
 const error = ref('');
-const showTools = ref(false);
 
 async function loadSession(): Promise<void> {
   loading.value = true;
   error.value = '';
+  // Light up the global-header controls right away (back + id) so the user can
+  // leave even while the transcript is still loading.
+  resetSessionHeader();
+  sessionHeader.active = true;
+  sessionHeader.sessionId = sessionId.value;
   try {
     const res = await fetch('/api/session/' + encodeURIComponent(sessionId.value));
     if (!res.ok) {
@@ -27,6 +32,10 @@ async function loadSession(): Promise<void> {
       return;
     }
     session.value = (await res.json()) as SessionResponse;
+    sessionHeader.agentType = session.value.chunks[0]?.agentType ?? null;
+    sessionHeader.filePath = session.value.filePath;
+    sessionHeader.cwd = session.value.cwd;
+    sessionHeader.canToggleTools = true;
     // Must set loading = false BEFORE nextTick so the v-if="!loading && session"
     // block renders the chunks into the DOM before scrollToMatch queries for them.
     loading.value = false;
@@ -50,7 +59,7 @@ function scrollToMatch(): void {
 }
 
 function visibleChunks(chunks: Chunk[]): Chunk[] {
-  if (showTools.value) return chunks;
+  if (sessionHeader.showTools) return chunks;
   return chunks.filter((c) => c.role !== 'tool');
 }
 
@@ -60,13 +69,20 @@ function chunkText(chunk: Chunk): string {
   return '(empty)';
 }
 
-function chunkStyle(chunk: Chunk): Record<string, string> {
-  if (chunk.role !== 'tool') return {};
-  return {
-    color: 'var(--muted-fg)',
-    fontFamily: '"JetBrains Mono", monospace',
-    fontSize: '12px',
-  };
+function msgClass(chunk: Chunk): string {
+  if (chunk.role === 'user') return 'msg msg-user';
+  if (chunk.role === 'assistant') return 'msg msg-assistant';
+  return '';
+}
+
+// User/assistant text is rendered as markdown; tool chunks stay as plain
+// monospace (they're name(args) or raw output, not prose).
+function renderedHtml(chunk: Chunk): string {
+  return renderMarkdown(chunk.text);
+}
+
+function isProse(chunk: Chunk): boolean {
+  return chunk.role !== 'tool' && Boolean(chunk.text);
 }
 
 function roleLabel(chunk: Chunk): string {
@@ -76,83 +92,19 @@ function roleLabel(chunk: Chunk): string {
   return chunk.role;
 }
 
-function agentBadgeClass(agentType: string): string {
-  if (agentType === 'claude') return 'badge badge-claude';
-  if (agentType === 'codex') return 'badge badge-codex';
-  if (agentType === 'pi') return 'badge badge-pi';
-  return 'badge badge-role';
-}
-
-function goBack(): void {
-  void router.push({ name: 'search' });
-}
-
 onMounted(() => {
   void loadSession();
+});
+
+onUnmounted(() => {
+  resetSessionHeader();
 });
 </script>
 
 <template>
-  <div style="max-width: 760px; margin: 0 auto; padding: 0 24px 48px">
-    <!-- Back + session header -->
-    <div
-      class="flex items-start gap-4 py-5 border-b mb-6"
-      style="border-color: var(--border)"
-    >
-      <button
-        class="flex-shrink-0 mt-0.5"
-        style="
-          background: none;
-          border: 1px solid var(--border);
-          border-radius: 4px;
-          padding: 4px 10px;
-          font-size: 12px;
-          cursor: pointer;
-          color: var(--muted-fg);
-          white-space: nowrap;
-        "
-        @click="goBack"
-      >
-        ← Search
-      </button>
-
-      <div class="flex flex-col gap-1 min-w-0 flex-1">
-        <div class="flex items-center gap-2 flex-wrap">
-          <span
-            v-if="session && session.chunks[0]"
-            :class="agentBadgeClass(session.chunks[0].agentType)"
-          >{{ session.chunks[0].agentType }}</span>
-          <span
-            class="font-mono"
-            style="font-size: 13px; font-weight: 500; word-break: break-all"
-          >{{ sessionId }}</span>
-        </div>
-        <span
-          v-if="session && session.filePath"
-          class="font-mono"
-          style="font-size: 11px; color: var(--muted-fg); word-break: break-all"
-        >{{ session.filePath }}</span>
-      </div>
-
-      <!-- Toggle tools -->
-      <button
-        v-if="!loading && !error"
-        class="flex-shrink-0 ml-auto mt-0.5"
-        style="
-          background: none;
-          border-radius: 4px;
-          padding: 4px 10px;
-          font-size: 12px;
-          cursor: pointer;
-          white-space: nowrap;
-          border: 1px solid var(--border);
-          color: var(--muted-fg);
-        "
-        @click="showTools = !showTools"
-      >
-        {{ showTools ? 'hide tools' : 'show tools' }}
-      </button>
-    </div>
+  <div style="max-width: 760px; margin: 0 auto; padding: 28px 24px 48px">
+    <!-- The session controls (back / id / filename / hide-tools) live in the
+         global header (App.vue) via the shared sessionHeader store. -->
 
     <!-- Loading -->
     <div
@@ -179,8 +131,7 @@ onMounted(() => {
       >
         <div
           :data-matched="isMatch(chunk) ? '' : undefined"
-          :class="isMatch(chunk) ? 'chunk-matched' : ''"
-          style="padding: 0 0 0 16px"
+          :class="[msgClass(chunk), isMatch(chunk) ? 'chunk-matched' : '']"
         >
           <!-- Role rule -->
           <div class="role-rule">
@@ -195,20 +146,18 @@ onMounted(() => {
             >:{{ chunk.lineNumber }}</span>
           </div>
 
-          <!-- Message text -->
+          <!-- Message text: markdown for prose, plain mono for tools -->
+          <div v-if="isProse(chunk)" class="md-body" v-html="renderedHtml(chunk)"></div>
           <div
+            v-else
             style="
-              padding-left: 2px;
-              font-size: 14px;
-              line-height: 1.65;
-              color: var(--fg);
+              font-family: 'JetBrains Mono', ui-monospace, monospace;
+              font-size: 12px;
+              color: var(--muted-fg);
               white-space: pre-wrap;
               word-break: break-word;
             "
-            :style="chunkStyle(chunk)"
-          >
-            {{ chunkText(chunk) }}
-          </div>
+          >{{ chunkText(chunk) }}</div>
         </div>
       </template>
 
@@ -228,7 +177,7 @@ onMounted(() => {
             font-size: 14px;
             text-decoration: underline;
           "
-          @click="showTools = true"
+          @click="sessionHeader.showTools = true"
         >Show them</button>.
       </div>
     </div>

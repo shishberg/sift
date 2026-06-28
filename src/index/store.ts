@@ -16,6 +16,8 @@ export interface SourceFile {
   lastSize: number;
   /** 1-based line number of the last indexed complete line (0 on first index). */
   lastLineNumber: number;
+  /** Working directory the session ran in, captured from the log. Undefined until known. */
+  cwd?: string;
 }
 
 export interface EmbedModelCheck {
@@ -46,6 +48,7 @@ interface SourceFileRow {
   last_offset: number;
   last_size: number;
   last_line_number: number;
+  cwd: string | null;
 }
 
 // ----- Store -----
@@ -65,6 +68,10 @@ export class Store {
   private readonly stmtQueuePending: Database.Statement;
   private readonly stmtGetSourceFile: Database.Statement;
   private readonly stmtUpsertSourceFile: Database.Statement;
+  private readonly stmtUpdateCwd: Database.Statement;
+  private readonly stmtInsertCwd: Database.Statement;
+  private readonly stmtGetSessionCwd: Database.Statement;
+  private readonly stmtSourceFilesMissingCwd: Database.Statement;
   private readonly stmtGetMeta: Database.Statement;
   private readonly stmtSetMeta: Database.Statement;
   private readonly stmtFtsSearch: Database.Statement;
@@ -152,6 +159,27 @@ export class Store {
         last_line_number = excluded.last_line_number
     `);
 
+    this.stmtUpdateCwd = this.db.prepare('UPDATE source_files SET cwd = ? WHERE path = ?');
+
+    this.stmtInsertCwd = this.db.prepare(
+      'INSERT INTO source_files (path, agent_type, cwd) VALUES (?, ?, ?)',
+    );
+
+    // cwd lives on source_files (keyed by file path); resolve a session's cwd by
+    // joining through any of its chunks' file paths. Works for opencode too, whose
+    // virtual `opencode://<id>` path gets a source_files row with the directory.
+    this.stmtGetSessionCwd = this.db.prepare(`
+      SELECT sf.cwd AS cwd
+      FROM   source_files sf
+      WHERE  sf.cwd IS NOT NULL
+        AND  sf.path IN (SELECT DISTINCT file_path FROM chunks WHERE session_id = ?)
+      LIMIT  1
+    `);
+
+    this.stmtSourceFilesMissingCwd = this.db.prepare(
+      'SELECT path, agent_type FROM source_files WHERE cwd IS NULL',
+    );
+
     this.stmtGetMeta = this.db.prepare('SELECT value FROM meta WHERE key = ?');
 
     this.stmtSetMeta = this.db.prepare(`
@@ -223,7 +251,8 @@ export class Store {
         inode            INTEGER,
         last_offset      INTEGER NOT NULL DEFAULT 0,
         last_size        INTEGER NOT NULL DEFAULT 0,
-        last_line_number INTEGER NOT NULL DEFAULT 0
+        last_line_number INTEGER NOT NULL DEFAULT 0,
+        cwd              TEXT
       );
 
       CREATE TABLE IF NOT EXISTS meta (
@@ -275,6 +304,7 @@ export class Store {
         `,
       },
       { ddl: 'ALTER TABLE source_files ADD COLUMN last_line_number INTEGER NOT NULL DEFAULT 0' },
+      { ddl: 'ALTER TABLE source_files ADD COLUMN cwd TEXT' },
     ];
 
     for (const { ddl, followUp } of migrations) {
@@ -377,7 +407,32 @@ export class Store {
       lastOffset: row.last_offset,
       lastSize: row.last_size,
       lastLineNumber: row.last_line_number,
+      cwd: row.cwd ?? undefined,
     };
+  }
+
+  /**
+   * Record the working directory for a source file. Updates the existing row;
+   * if there is none (opencode's virtual path has no tail row), inserts one.
+   * Leaves the tail columns at their defaults — only the cwd is set here.
+   */
+  setSourceFileCwd(path: string, cwd: string, agentType: string): void {
+    const res = this.stmtUpdateCwd.run(cwd, path);
+    if (res.changes === 0) {
+      this.stmtInsertCwd.run(path, agentType, cwd);
+    }
+  }
+
+  /** The working directory for a session, or undefined if not recorded yet. */
+  getSessionCwd(sessionId: string): string | undefined {
+    const row = this.stmtGetSessionCwd.get(sessionId) as { cwd: string } | undefined;
+    return row?.cwd;
+  }
+
+  /** Source files that have no recorded cwd yet — input for the cwd backfill. */
+  sourceFilesMissingCwd(): Array<{ path: string; agentType: string }> {
+    const rows = this.stmtSourceFilesMissingCwd.all() as Array<{ path: string; agent_type: string }>;
+    return rows.map((r) => ({ path: r.path, agentType: r.agent_type }));
   }
 
   upsertSourceFile(sf: SourceFile): void {

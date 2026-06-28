@@ -13,6 +13,12 @@ export interface Adapter {
   claims(filePath: string): boolean;
   /** Parse one raw JSONL line into 0+ chunks. ctx carries filePath + lineNumber. */
   parseLine(line: string, ctx: ParseCtx): Chunk[];
+  /**
+   * Pull the session's working directory out of a single line, if this line
+   * carries it (undefined otherwise). Different agents record it on different
+   * record types — claude on every message, codex/pi on their first metadata line.
+   */
+  extractCwd(line: string): string | undefined;
 }
 
 export interface Registry {

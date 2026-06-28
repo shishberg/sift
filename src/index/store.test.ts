@@ -384,6 +384,42 @@ describe('Store', () => {
     });
   });
 
+  describe('cwd (working directory)', () => {
+    it('getSessionCwd returns undefined when no cwd is recorded', () => {
+      store.addChunk(makeChunk({ sessionId: 's-nocwd', filePath: '/f.jsonl' }));
+      expect(store.getSessionCwd('s-nocwd')).toBeUndefined();
+    });
+
+    it('setSourceFileCwd updates an existing source_files row and getSessionCwd resolves it via chunks', () => {
+      const path = '/home/u/.claude/projects/x/sess.jsonl';
+      store.upsertSourceFile({ path, agentType: 'claude', lastOffset: 0, lastSize: 0, lastLineNumber: 0 });
+      store.addChunk(makeChunk({ sessionId: 's1', filePath: path }));
+
+      store.setSourceFileCwd(path, '/home/u/src/agent-search', 'claude');
+
+      expect(store.getSessionCwd('s1')).toBe('/home/u/src/agent-search');
+      expect(store.getSourceFile(path)!.cwd).toBe('/home/u/src/agent-search');
+    });
+
+    it('setSourceFileCwd inserts a row when none exists (opencode virtual path)', () => {
+      const path = 'opencode://os1';
+      store.addChunk(makeChunk({ agentType: 'opencode', sessionId: 'os1', filePath: path }));
+
+      store.setSourceFileCwd(path, '/home/u/src/mopoke', 'opencode');
+
+      expect(store.getSessionCwd('os1')).toBe('/home/u/src/mopoke');
+    });
+
+    it('sourceFilesMissingCwd lists rows without a cwd and omits ones that have it', () => {
+      store.upsertSourceFile({ path: '/a.jsonl', agentType: 'claude', lastOffset: 0, lastSize: 0, lastLineNumber: 0 });
+      store.upsertSourceFile({ path: '/b.jsonl', agentType: 'codex', lastOffset: 0, lastSize: 0, lastLineNumber: 0 });
+      store.setSourceFileCwd('/b.jsonl', '/home/u/b', 'codex');
+
+      const missing = store.sourceFilesMissingCwd();
+      expect(missing).toEqual([{ path: '/a.jsonl', agentType: 'claude' }]);
+    });
+  });
+
   describe('meta', () => {
     it('getMeta returns undefined for unknown key', () => {
       expect(store.getMeta('unknown_key')).toBeUndefined();

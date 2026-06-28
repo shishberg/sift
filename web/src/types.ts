@@ -28,6 +28,8 @@ export interface Chunk {
 export interface SessionResponse {
   sessionId: string;
   filePath: string;
+  /** Working directory the session ran in, relative to $HOME ('' if unknown). */
+  cwd: string;
   chunks: Chunk[];
 }
 

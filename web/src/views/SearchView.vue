@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
-import { useRouter } from 'vue-router';
+import { ref, computed, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import type { SearchResult } from '@/types';
 
+const route = useRoute();
 const router = useRouter();
 const query = ref('');
 const results = ref<SearchResult[]>([]);
@@ -10,10 +11,52 @@ const loading = ref(false);
 const error = ref('');
 const searched = ref(false);
 
-async function doSearch(): Promise<void> {
-  const q = query.value.trim();
-  if (!q) return;
+// ── Recent search history (localStorage) ──────────────────────────────────
+const HISTORY_KEY = 'agent-search:history';
+const HISTORY_MAX = 10;
+const history = ref<string[]>(loadHistory());
+const showHistory = ref(false);
 
+function loadHistory(): string[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(term: string): void {
+  history.value = [term, ...history.value.filter((t) => t !== term)].slice(0, HISTORY_MAX);
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history.value));
+  } catch {
+    // localStorage unavailable (private mode) — history is best-effort.
+  }
+}
+
+function clearHistory(): void {
+  history.value = [];
+  showHistory.value = false;
+  try {
+    localStorage.removeItem(HISTORY_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+// Suggestions shown in the dropdown — filtered by what's typed.
+const suggestions = computed((): string[] => {
+  const q = query.value.trim().toLowerCase();
+  const items = q
+    ? history.value.filter((t) => t.toLowerCase().includes(q) && t.toLowerCase() !== q)
+    : history.value;
+  return items.slice(0, 8);
+});
+
+// ── Search ────────────────────────────────────────────────────────────────
+async function runSearch(q: string): Promise<void> {
   loading.value = true;
   error.value = '';
   searched.value = true;
@@ -35,15 +78,51 @@ async function doSearch(): Promise<void> {
   }
 }
 
-function goToSession(result: SearchResult): void {
-  void router.push({
+// Submitting puts the term in the URL so back-navigation restores it. The
+// route watcher below runs the actual fetch.
+function submit(): void {
+  const q = query.value.trim();
+  if (!q) return;
+  showHistory.value = false;
+  saveHistory(q);
+  if (route.query.q === q) {
+    void runSearch(q); // same term — route won't change, re-run directly
+  } else {
+    void router.push({ name: 'search', query: { q } });
+  }
+}
+
+function pickSuggestion(term: string): void {
+  query.value = term;
+  submit();
+}
+
+// React to the URL's q param: covers first load, shared links, and the back
+// button returning from a session.
+watch(
+  () => route.query.q,
+  (q) => {
+    const term = typeof q === 'string' ? q : '';
+    if (!term) {
+      // Navigated home (e.g. the logo) — reset to a clean search page.
+      query.value = '';
+      results.value = [];
+      searched.value = false;
+      error.value = '';
+      return;
+    }
+    if (term !== query.value) query.value = term;
+    void runSearch(term);
+  },
+  { immediate: true },
+);
+
+function sessionTo(result: SearchResult) {
+  return {
     name: 'session',
     params: { id: result.sessionId },
-    query: {
-      file: result.filePath,
-      line: String(result.lineNumber),
-    },
-  });
+    query: { file: result.filePath, line: String(result.lineNumber) },
+  };
 }
 
 function agentBadgeClass(agentType: string): string {
@@ -60,25 +139,48 @@ const resultCount = computed(() => results.value.length);
   <div class="flex flex-col items-center px-4 pt-16 pb-12" style="max-width: 720px; margin: 0 auto">
     <!-- Search input -->
     <div class="w-full" style="max-width: 600px">
-      <form @submit.prevent="doSearch" class="flex gap-2">
-        <input
-          v-model="query"
-          type="text"
-          placeholder="Search sessions…"
-          autofocus
-          class="flex-1 rounded-md border px-4 py-2.5 outline-none transition-shadow"
-          style="
-            font-size: 15px;
-            background: var(--white);
-            border-color: var(--border);
-            color: var(--fg);
-            font-family: 'Inter', system-ui, sans-serif;
-          "
-          :style="{
-            boxShadow: query ? '0 0 0 2px var(--violet-subtle)' : 'none',
-            borderColor: query ? 'var(--violet-border)' : 'var(--border)',
-          }"
-        />
+      <form @submit.prevent="submit" class="flex gap-2">
+        <div style="position: relative; flex: 1">
+          <input
+            v-model="query"
+            type="text"
+            placeholder="Search sessions…"
+            autofocus
+            autocomplete="off"
+            class="w-full rounded-md border px-4 py-2.5 outline-none transition-shadow"
+            style="
+              font-size: 15px;
+              background: var(--white);
+              border-color: var(--border);
+              color: var(--fg);
+              font-family: 'Inter', system-ui, sans-serif;
+            "
+            :style="{
+              boxShadow: query ? '0 0 0 2px var(--violet-subtle)' : 'none',
+              borderColor: query ? 'var(--violet-border)' : 'var(--border)',
+            }"
+            @focus="showHistory = true"
+            @blur="showHistory = false"
+            @keydown.escape="showHistory = false"
+          />
+
+          <!-- Recent searches -->
+          <ul v-if="showHistory && suggestions.length" class="history-dropdown">
+            <li
+              v-for="term in suggestions"
+              :key="term"
+              class="history-item"
+              @mousedown.prevent="pickSuggestion(term)"
+            >
+              <span style="color: var(--muted-fg); font-size: 12px">↩</span>
+              <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ term }}</span>
+            </li>
+            <button type="button" class="history-clear" @mousedown.prevent="clearHistory">
+              Clear recent searches
+            </button>
+          </ul>
+        </div>
+
         <button
           type="submit"
           :disabled="loading || !query.trim()"
@@ -144,52 +246,44 @@ const resultCount = computed(() => results.value.length);
         <li
           v-for="result in results"
           :key="`${result.sessionId}:${result.lineNumber}`"
-          class="rounded-md px-4 py-3 cursor-pointer transition-colors"
-          style="
-            border: 1px solid transparent;
-            background: var(--white);
-          "
-          :style="{}"
-          @click="goToSession(result)"
-          @mouseenter="($event.currentTarget as HTMLElement).style.background = 'var(--surface)'"
-          @mouseleave="($event.currentTarget as HTMLElement).style.background = 'var(--white)'"
         >
-          <!-- Meta row -->
-          <div class="flex items-center gap-2 flex-wrap mb-1.5" style="font-size: 12px">
-            <span :class="agentBadgeClass(result.agentType)">{{ result.agentType }}</span>
-            <span
-              class="font-mono"
-              style="color: var(--fg); font-size: 12px; font-weight: 500"
-              :title="result.sessionId"
-            >
-              {{ result.sessionId.length > 28 ? result.sessionId.slice(0, 28) + '…' : result.sessionId }}
-            </span>
-            <span style="color: var(--border)">·</span>
-            <span class="font-mono" style="color: var(--muted-fg); font-size: 11px">
-              {{ result.filePath.split('/').pop() }}:{{ result.lineNumber }}
-            </span>
-            <span style="color: var(--border)">·</span>
-            <span
-              class="badge badge-role"
-              style="font-size: 10px; padding: 1px 5px"
-            >{{ result.role }}</span>
-          </div>
-
-          <!-- Snippet -->
-          <p
-            class="m-0"
+          <RouterLink
+            :to="sessionTo(result)"
+            class="block rounded-md px-4 py-3 transition-colors"
             style="
-              font-size: 13px;
-              color: var(--fg);
-              line-height: 1.5;
-              display: -webkit-box;
-              -webkit-line-clamp: 2;
-              -webkit-box-orient: vertical;
-              overflow: hidden;
+              border: 1px solid transparent;
+              background: var(--white);
+              text-decoration: none;
+              color: inherit;
             "
+            @mouseenter="($event.currentTarget as HTMLElement).style.background = 'var(--surface)'"
+            @mouseleave="($event.currentTarget as HTMLElement).style.background = 'var(--white)'"
           >
-            {{ result.snippet || '(no text)' }}
-          </p>
+            <!-- Meta row -->
+            <div class="flex items-center gap-2 flex-wrap mb-1.5" style="font-size: 12px">
+              <span :class="agentBadgeClass(result.agentType)">{{ result.agentType }}</span>
+              <span
+                class="badge badge-role"
+                style="font-size: 10px; padding: 1px 5px"
+              >{{ result.role }}</span>
+            </div>
+
+            <!-- Snippet -->
+            <p
+              class="m-0"
+              style="
+                font-size: 13px;
+                color: var(--fg);
+                line-height: 1.5;
+                display: -webkit-box;
+                -webkit-line-clamp: 2;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+              "
+            >
+              {{ result.snippet || '(no text)' }}
+            </p>
+          </RouterLink>
         </li>
       </ul>
     </div>
@@ -200,7 +294,7 @@ const resultCount = computed(() => results.value.length);
       class="mt-16 text-center"
       style="color: var(--muted-fg); font-size: 13px; line-height: 1.8"
     >
-      <p class="m-0">Search across Claude, Codex, and pi session logs.</p>
+      <p class="m-0">Search across Claude, Codex, opencode, and pi session logs.</p>
       <p class="m-0">
         Results link to the full transcript, scrolled to the matching line.
       </p>

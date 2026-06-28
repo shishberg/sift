@@ -28,6 +28,7 @@ function fakeAdapter(dir: string): Adapter {
     agentType: 'claude',
     rootDir: dir,
     claims: (filePath: string) => filePath.startsWith(dir),
+    extractCwd: (): string | undefined => undefined,
     parseLine: (line: string, ctx): Chunk[] => {
       try {
         const obj = JSON.parse(line) as { role?: string; text?: string };

@@ -27,6 +27,17 @@ export class ClaudeAdapter implements Adapter {
     return filePath.startsWith(this.rootDir + path.sep) || filePath.startsWith(this.rootDir + '/');
   }
 
+  // Claude records `cwd` at the top level of every message record.
+  extractCwd(line: string): string | undefined {
+    try {
+      const record = JSON.parse(line) as Record<string, unknown>;
+      const cwd = record['cwd'];
+      return typeof cwd === 'string' ? cwd : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   parseLine(line: string, ctx: ParseCtx): Chunk[] {
     const trimmed = line.trim();
     if (!trimmed) return [];

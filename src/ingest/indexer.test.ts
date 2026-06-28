@@ -6,7 +6,7 @@ import { Store, EMBED_DIMS } from '../index/store.js';
 import type { Chunk } from '../types.js';
 import type { Adapter, Registry } from '../adapters/types.js';
 import type { Embedder } from '../embed/types.js';
-import { indexFile, EmbedWorker } from './indexer.js';
+import { indexFile, EmbedWorker, backfillCwd } from './indexer.js';
 
 // ---- helpers ----
 
@@ -28,6 +28,14 @@ function fakeAdapter(dir: string): Adapter {
     agentType: 'claude',
     rootDir: dir,
     claims: (filePath: string) => filePath.startsWith(dir),
+    extractCwd: (line: string): string | undefined => {
+      try {
+        const o = JSON.parse(line) as { cwd?: string };
+        return typeof o.cwd === 'string' ? o.cwd : undefined;
+      } catch {
+        return undefined;
+      }
+    },
     parseLine: (line: string, ctx): Chunk[] => {
       try {
         const obj = JSON.parse(line) as { role?: string; text?: string };
@@ -173,6 +181,74 @@ describe('indexFile', () => {
     expect(sf).toBeDefined();
     expect(sf!.lastOffset).toBe(Buffer.byteLength(line, 'utf8'));
     expect(sf!.lastLineNumber).toBe(1);
+  });
+
+  it('captures the working directory from the log onto the source file', async () => {
+    const filePath = join(tmpDir, 'cwd.jsonl');
+    writeFileSync(
+      filePath,
+      JSON.stringify({ role: 'user', text: 'hi', cwd: '/Users/agent/src/agent-search' }) + '\n',
+    );
+
+    await indexFile(filePath, store, fakeRegistry(tmpDir));
+
+    expect(store.getSourceFile(filePath)!.cwd).toBe('/Users/agent/src/agent-search');
+    expect(store.getSessionCwd('test-session')).toBe('/Users/agent/src/agent-search');
+  });
+
+  it('captures cwd from a metadata line that produces no chunks', async () => {
+    const filePath = join(tmpDir, 'cwd-sep.jsonl');
+    writeFileSync(
+      filePath,
+      [
+        JSON.stringify({ cwd: '/Users/agent/src/proj' }), // metadata only — no chunk
+        JSON.stringify({ role: 'user', text: 'hi' }), // chunk, no cwd
+      ].join('\n') + '\n',
+    );
+
+    await indexFile(filePath, store, fakeRegistry(tmpDir));
+
+    expect(store.getSessionCwd('test-session')).toBe('/Users/agent/src/proj');
+  });
+
+  it('backfillCwd fills cwd for an already-indexed file by reading its head', async () => {
+    const filePath = join(tmpDir, 'old.jsonl');
+    writeFileSync(
+      filePath,
+      [
+        JSON.stringify({ cwd: '/Users/agent/src/proj' }),
+        JSON.stringify({ role: 'user', text: 'hi' }),
+      ].join('\n') + '\n',
+    );
+    // Simulate prior indexing that predates the cwd column: a source_files row and
+    // a chunk exist, but cwd was never recorded.
+    store.upsertSourceFile({ path: filePath, agentType: 'claude', lastOffset: 0, lastSize: 0, lastLineNumber: 0 });
+    store.addChunk({
+      agentType: 'claude',
+      sessionId: 'test-session',
+      filePath,
+      lineNumber: 2,
+      role: 'user',
+      text: 'hi',
+      timestamp: '2026-01-01T00:00:00Z',
+    });
+
+    const filled = await backfillCwd(store, fakeRegistry(tmpDir));
+
+    expect(filled).toBe(1);
+    expect(store.getSessionCwd('test-session')).toBe('/Users/agent/src/proj');
+  });
+
+  it('backfillCwd leaves files that already have a cwd untouched', async () => {
+    const filePath = join(tmpDir, 'has-cwd.jsonl');
+    writeFileSync(filePath, JSON.stringify({ cwd: '/x' }) + '\n');
+    store.upsertSourceFile({ path: filePath, agentType: 'claude', lastOffset: 0, lastSize: 0, lastLineNumber: 0 });
+    store.setSourceFileCwd(filePath, '/already/set', 'claude');
+
+    const filled = await backfillCwd(store, fakeRegistry(tmpDir));
+
+    expect(filled).toBe(0);
+    expect(store.getSourceFile(filePath)!.cwd).toBe('/already/set');
   });
 
   it('returns 0 for a file not claimed by any adapter', async () => {

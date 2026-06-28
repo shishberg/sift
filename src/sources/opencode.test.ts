@@ -30,8 +30,19 @@ function createFixtureDb(): Database.Database {
       time_updated INTEGER NOT NULL,
       data         TEXT    NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS session (
+      id        TEXT PRIMARY KEY,
+      directory TEXT
+    );
   `);
   return db;
+}
+
+function insertSession(
+  db: Database.Database,
+  opts: { id: string; directory: string },
+): void {
+  db.prepare('INSERT INTO session (id, directory) VALUES (?, ?)').run(opts.id, opts.directory);
 }
 
 const stmtInsertMessage = (db: Database.Database) =>
@@ -122,6 +133,41 @@ describe('OpenCodeSource', () => {
     expect(chunk.filePath).toBe('opencode://ses_1');
     expect(chunk.timestamp).toBe(new Date(1_700_000_000_001).toISOString());
     expect(chunk.toolCall).toBeUndefined();
+  });
+
+  it('records the session working directory from the opencode session table', () => {
+    insertSession(fixtureDb, { id: 'ses_cwd', directory: '/Users/agent/src/mopoke' });
+    insertMessage(fixtureDb, { id: 'msg_cwd', sessionId: 'ses_cwd', role: 'user' });
+    insertPart(fixtureDb, {
+      id: 'prt_cwd',
+      messageId: 'msg_cwd',
+      sessionId: 'ses_cwd',
+      data: { type: 'text', text: 'hello' },
+    });
+
+    const source = new OpenCodeSource(fixtureDb);
+    source.index(store);
+
+    expect(store.getSessionCwd('ses_cwd')).toBe('/Users/agent/src/mopoke');
+  });
+
+  it('backfillCwd sets cwd for already-indexed sessions from the session table', () => {
+    // A chunk already exists (indexed before the cwd column) but has no cwd.
+    store.addChunk({
+      agentType: 'opencode',
+      sessionId: 'ses_back',
+      filePath: 'opencode://ses_back',
+      lineNumber: 1,
+      role: 'user',
+      text: 'hi',
+      timestamp: '',
+    });
+    insertSession(fixtureDb, { id: 'ses_back', directory: '/Users/agent/src/x' });
+
+    const source = new OpenCodeSource(fixtureDb);
+    source.backfillCwd(store);
+
+    expect(store.getSessionCwd('ses_back')).toBe('/Users/agent/src/x');
   });
 
   it('maps an assistant text part to an assistant chunk', () => {

@@ -277,3 +277,19 @@ describe('ClaudeAdapter', () => {
     });
   });
 });
+
+describe('ClaudeAdapter.extractCwd', () => {
+  const adapter = new ClaudeAdapter();
+
+  it('returns cwd from a record that carries it', () => {
+    expect(adapter.extractCwd(USER_TEXT_ARRAY_LINE)).toBe('/Users/agent/src/agent-search');
+  });
+
+  it('returns undefined when the record has no cwd', () => {
+    expect(adapter.extractCwd(USER_TEXT_STRING_LINE)).toBeUndefined();
+  });
+
+  it('returns undefined for a non-JSON line', () => {
+    expect(adapter.extractCwd('not json')).toBeUndefined();
+  });
+});

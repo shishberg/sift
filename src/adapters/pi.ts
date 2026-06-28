@@ -33,6 +33,18 @@ export class PiAdapter implements Adapter {
     return filePath.startsWith(this.rootDir + path.sep) || filePath.startsWith(this.rootDir + '/');
   }
 
+  // Pi records `cwd` once, on the `session` record (first line).
+  extractCwd(line: string): string | undefined {
+    try {
+      const record = JSON.parse(line) as Record<string, unknown>;
+      if (record['type'] !== 'session') return undefined;
+      const cwd = record['cwd'];
+      return typeof cwd === 'string' ? cwd : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   parseLine(line: string, ctx: ParseCtx): Chunk[] {
     const trimmed = line.trim();
     if (!trimmed) return [];

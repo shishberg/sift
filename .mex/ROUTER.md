@@ -20,7 +20,7 @@ edges:
     condition: when working on querying, ranking, or how results are returned
   - target: context/agent-adapters.md
     condition: when adding an agent or touching agent-specific parsing
-last_updated: 2026-06-27
+last_updated: 2026-06-28
 ---
 
 # Session Bootstrap
@@ -44,8 +44,19 @@ See `context/impl-spec.md` for the concrete build and `context/decisions.md` for
 - Local embedder: ollama `nomic-embed-text`, with task prefixes + a model/dims guard
 - Hybrid search: vec + FTS5 merged with RRF (k=60); FTS queries sanitized for punctuation
 - CLI: search, show, index, watch, status, serve (+ live progress bar)
-- Web app: Vue 3 + Vite + shadcn-vue + Tailwind 4; search, session view (scroll-to-match),
-  live queue Progress bar polling `/api/status`
+- Working directory per session: captured at ingest via `adapter.extractCwd` (claude/codex/pi)
+  or opencode's `session.directory`, stored on `source_files.cwd`, resolved per session by
+  joining chunks→source_files. A one-time `backfillCwd` (run at index/watch/serve startup)
+  fills it for data indexed before the column existed. The session API returns it home-relative.
+- Web app: Vue 3 + Vite + shadcn-vue + Tailwind 4; search + session view. Results are real
+  links (open in new tab); the query lives in the URL (`/?q=…`) so back-nav restores it, plus
+  a localStorage recent-search dropdown. Session view renders message text as markdown
+  (markdown-it), styles user/assistant in distinct coloured boxes, and scrolls to the
+  matched chunk. On a session page the global header hosts the session controls (back / agent /
+  session id + copy / working dir + copy-log-path / hide-tools) via a shared `sessionHeader`
+  store. Live queue Progress bar polls `/api/status`. Copy buttons go through
+  `lib/clipboard.ts` `copyText`, which falls back to a hidden-textarea
+  `execCommand('copy')` when `navigator.clipboard` is absent (insecure http:// origins).
 
 **Known issues / follow-ups (non-blocking):**
 - See the handoff doc for the remaining minor notes. RRF validated qualitatively on real

@@ -17,7 +17,7 @@ edges:
     condition: when checking the "everything goes through the adapter" rule
   - target: patterns/add-agent-adapter.md
     condition: when actually adding support for a new agent type
-last_updated: 2026-06-27
+last_updated: 2026-06-28
 ---
 
 # Agent Adapters
@@ -34,6 +34,11 @@ Adding an agent = adding an adapter; nothing else changes.
 - Parsing a raw JSONL line into the common chunk shape.
 - Extracting: role (user/assistant/tool), text content, tool-call info, timestamp,
   session id, line number.
+- `extractCwd(line)` — pull the session's working directory from a line if it
+  carries one (claude: top-level `cwd` on every message; codex: `session_meta`
+  payload `cwd`; pi: the `session` record `cwd`). The indexer captures the first
+  hit per file into `source_files.cwd`. opencode (a DB source, not an adapter)
+  reads `session.directory` instead.
 - A stable agent type id (`claude`, `codex`, `pi`).
 
 ## Common chunk shape (the contract)
