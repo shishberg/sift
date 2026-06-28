@@ -1,35 +1,27 @@
 ---
 name: agents
 description: Always-loaded project anchor. Read this first. Contains project identity, non-negotiables, commands, and pointer to ROUTER.md for full context.
-last_updated: [YYYY-MM-DD]
+last_updated: 2026-06-28
 ---
 
-# [Project Name]
+# agent-search
 
 ## What This Is
-<!-- One sentence. What does this project do?
-     Length: 1 sentence maximum.
-     Not a tagline — a factual description of what the software does.
-     Example: "A REST API for managing inventory across multiple warehouse locations." -->
+A local tool that indexes agent session logs (Claude, Codex, pi, opencode) into a single SQLite hybrid (vector + full-text) index and searches them from a CLI and a web app.
 
 ## Non-Negotiables
-<!-- Hard rules the agent must never violate. Not preferences — rules.
-     These are the things that, if broken, cause real damage to the codebase.
-     Length: 3-7 items maximum. More than 7 means the list has not been prioritised.
-     Example:
-     - Never write database queries outside of the repository layer
-     - Never commit secrets or API keys
-     - Always handle errors explicitly — no silent failures -->
+- READ-ONLY on session logs — never write to or modify the agents' log files; they are the source of truth.
+- Embeddings stay LOCAL (ollama) — never call a cloud embedding API.
+- Agent-specific format logic lives ONLY in `src/adapters/` (JSONL) or `src/sources/` (non-JSONL); nothing else branches on agent type.
+- Every search result must carry a source locator: session id (+ file path / line number) so it traces back to the log.
+- Plain string queries only — no query/filter syntax without an explicit decision.
 
 ## Commands
-<!-- The exact commands needed to work on this project.
-     Include: run dev server, run tests, run linter, build.
-     Use the actual commands from this codebase — not placeholders.
-     Example:
-     - Dev: `npm run dev`
-     - Test: `npm test`
-     - Lint: `npm run lint`
-     - Build: `npm run build` -->
+- Build: `npm run build` (tsc → `dist/`)
+- Test: `npm test` (vitest) · Types: `npm run typecheck`
+- Index / watch: `agent-search index` · `agent-search watch` · `agent-search status`
+- Search / read: `agent-search <query> [--limit N] [--format json]` · `agent-search show <id> [--tools]`
+- Web: `agent-search serve [--port N] [--watch]` · dev frontend `npm run web:dev`
 
 ## After Every Task
 After meaningful work, run GROW:
