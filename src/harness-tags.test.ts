@@ -48,6 +48,26 @@ describe('stripHarnessTags', () => {
     expect(stripHarnessTags('just a normal question?')).toBe('just a normal question?');
   });
 
+  it('drops the codex environment_context block', () => {
+    const input =
+      '<environment_context>\n  <cwd>/x</cwd>\n  <shell>zsh</shell>\n</environment_context>';
+    expect(stripHarnessTags(input)).toBe('');
+  });
+
+  it('drops codex collaboration_mode and skills_instructions blocks', () => {
+    expect(stripHarnessTags('<collaboration_mode>pair</collaboration_mode>')).toBe('');
+    expect(
+      stripHarnessTags('<skills_instructions>do things</skills_instructions>'),
+    ).toBe('');
+  });
+
+  it('keeps surrounding content when dropping a codex preamble block', () => {
+    const input =
+      '# AGENTS.md instructions\n\nuse TDD\n\n' +
+      '<environment_context>\n  <cwd>/x</cwd>\n</environment_context>';
+    expect(stripHarnessTags(input)).toBe('# AGENTS.md instructions\n\nuse TDD');
+  });
+
   it('every registry entry has a known strategy', () => {
     for (const strategy of Object.values(HARNESS_TAGS)) {
       expect(['unwrap', 'drop']).toContain(strategy);

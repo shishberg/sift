@@ -3,6 +3,7 @@ import path from 'path';
 import type { Chunk } from '../types.js';
 import type { Adapter, ParseCtx } from './types.js';
 import { truncate, TOOL_ARGS_MAX, TOOL_RESULT_MAX } from '../text.js';
+import { stripHarnessTags } from '../harness-tags.js';
 
 /**
  * Derive the codex session id from the filename.
@@ -84,10 +85,13 @@ export class CodexAdapter implements Adapter {
       if (!Array.isArray(content)) return [];
 
       // Concatenate input_text / output_text blocks.
-      const text = content
+      const joined = content
         .filter((b) => b['type'] === 'input_text' || b['type'] === 'output_text')
         .map((b) => b['text'] as string)
         .join('');
+      // Strip codex's injected harness preamble from user turns.
+      const text = role === 'user' ? stripHarnessTags(joined) : joined;
+      if (!text) return [];
 
       return [{ agentType, sessionId, filePath, lineNumber, role: role as 'user' | 'assistant', text, timestamp }];
     }

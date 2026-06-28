@@ -67,30 +67,33 @@ Adapters are registered so the watcher can pick the right one per directory/file
 [TO BE DETERMINED — define the registry/interface signature after first
 implementation, then record it here so new adapters follow it.]
 
-## Harness wrapper tags (claude)
-Claude Code injects XML wrapper tags into the *user* turn to annotate harness
-activity: slash-command invocations (`<command-name>`, `<command-message>`,
-`<command-args>`) and local `!`-command output (`<local-command-stdout>`,
-`<local-command-stderr>`, `<local-command-caveat>`). `src/harness-tags.ts` holds
-a CLOSED registry (`HARNESS_TAGS`) mapping each tag to `unwrap` (drop tags, keep
-inner text) or `drop` (remove element + content; the caveat is pure boilerplate).
+## Harness wrapper tags
+Agents inject XML wrapper tags into the *user* turn to annotate harness activity.
+`src/harness-tags.ts` holds a CLOSED registry (`HARNESS_TAGS`) mapping each known
+tag to `unwrap` (drop tags, keep inner text) or `drop` (remove element + content).
 `stripHarnessTags(text)` is a no-op unless a registry tag is present, so real
-code/XML in messages is never touched. Applied to user text in BOTH the claude
-adapter (`src/adapters/claude.ts`, indexed text) and the faithful renderer
-(`src/render/claude.ts`, transcript view). Render is fixed immediately (reads raw
-logs); search snippets only update for chunks indexed after this — re-index to
-clean existing rows. Add new harness tags to the registry; nothing else changes.
+code/XML in messages is never touched. Applied to **user** text in both the
+indexer (adapter) and the faithful renderer for each agent that needs it. The
+registry is shared across agents — tag names are distinct, so cross-application is
+harmless. Render is fixed immediately (reads raw logs); search snippets only
+update for chunks indexed after this — re-index to clean existing rows.
 
-Other agents (surveyed 2026-06-28):
-- **codex** injects an `<environment_context>` block (`<cwd>`/`<shell>`/
-  `<current_date>`/`<timezone>`) plus an AGENTS.md/`user_instructions` preamble
-  into a synthetic first user message — its own harness noise, a different shape
-  from claude's. NOT yet stripped (the registry is wired only into the claude
-  path). If we tackle it, drop it codex-side only — the nested tag names (`cwd`,
-  `shell`) are too generic to strip globally.
+Per agent (surveyed 2026-06-28):
+- **claude** — slash-command invocations (`<command-name>`, `<command-message>`,
+  `<command-args>` → unwrap) and local `!`-command output
+  (`<local-command-stdout>`/`<local-command-stderr>` → unwrap;
+  `<local-command-caveat>` → drop, pure boilerplate). Wired into
+  `src/adapters/claude.ts` + `src/render/claude.ts`.
+- **codex** — preamble blocks injected into the first user turn:
+  `<environment_context>` (cwd/shell/date), `<collaboration_mode>`,
+  `<skills_instructions>` → all `drop`. The AGENTS.md/`<INSTRUCTIONS>` project
+  preamble is deliberately KEPT (real content). Wired into
+  `src/adapters/codex.ts` + `src/render/codex.ts`. Note: the nested env tags
+  (`cwd`, `shell`) are removed as part of the dropped block, NOT registered
+  individually — they're too generic to strip on their own.
 - **pi** — clean. No injected wrapper tags (stray `<command-name>` hits were file
-  content inside tool results, not annotations).
-- **opencode** — clean. No systematic wrapper tags.
+  content inside tool results, not annotations). Not wired.
+- **opencode** — clean. No systematic wrapper tags. Not wired.
 
 ## Out of scope
 - Hooks-based ingestion — kept open as a future per-agent capability, but adapters

@@ -1,4 +1,5 @@
 import type { TranscriptItem } from '../types.js';
+import { stripHarnessTags } from '../harness-tags.js';
 
 /** Codex tool output is usually a string but can be structured (e.g. image blocks). */
 function codexOutputText(output: unknown): string {
@@ -39,10 +40,11 @@ export function parseCodexTranscript(lines: string[], filePath: string): Transcr
       if (role !== 'user' && role !== 'assistant') return; // skip developer/system
       const content = payload['content'] as Record<string, unknown>[] | undefined;
       if (!Array.isArray(content)) return;
-      const text = content
+      const joined = content
         .filter((b) => b['type'] === 'input_text' || b['type'] === 'output_text')
         .map((b) => (b['text'] as string | undefined) ?? '')
         .join('');
+      const text = role === 'user' ? stripHarnessTags(joined) : joined;
       if (text) items.push({ role, text, filePath, lineNumbers: [lineNumber], timestamp });
     } else if (payloadType === 'function_call') {
       const name = (payload['name'] as string | undefined) ?? '';

@@ -175,6 +175,28 @@ describe('CodexAdapter', () => {
       expect(c.lineNumber).toBe(3);
       expect(c.timestamp).toBe('2026-06-26T23:27:05.809Z');
     });
+
+    it('drops the injected environment_context block but keeps real content', () => {
+      const line = JSON.stringify({
+        timestamp: 't1',
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text:
+                '# AGENTS.md instructions\n\nuse TDD\n\n' +
+                '<environment_context>\n  <cwd>/x</cwd>\n  <shell>zsh</shell>\n</environment_context>',
+            },
+          ],
+        },
+      });
+      const chunks = adapter.parseLine(line, CTX);
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0].text).toBe('# AGENTS.md instructions\n\nuse TDD');
+    });
   });
 
   describe('parseLine() — assistant message', () => {

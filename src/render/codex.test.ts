@@ -22,6 +22,28 @@ describe('parseCodexTranscript', () => {
     expect(items[1].lineNumbers).toEqual([2, 3]);
   });
 
+  it('drops the injected environment_context block from user messages', () => {
+    const items = parseCodexTranscript(
+      lines({
+        type: 'response_item',
+        timestamp: 't1',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text:
+                'real question\n\n<environment_context>\n  <cwd>/x</cwd>\n</environment_context>',
+            },
+          ],
+        },
+      }),
+      FP,
+    );
+    expect(items.map((i) => i.text)).toEqual(['real question']);
+  });
+
   it('skips developer messages and non-response_item lines', () => {
     const items = parseCodexTranscript(
       lines(

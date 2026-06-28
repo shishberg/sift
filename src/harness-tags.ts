@@ -1,8 +1,10 @@
 /**
- * Claude Code injects a handful of XML wrapper tags into the *user* turn of a
- * session log to annotate harness activity — slash-command invocations and the
- * output of local `!`-commands. In a search snippet or a rendered transcript
- * these read as angle-bracket noise, so we normalise them away.
+ * Agents inject XML wrapper tags into the *user* turn of a session log to
+ * annotate harness activity — Claude's slash-command invocations and local
+ * `!`-command output, codex's environment/context preamble blocks. In a search
+ * snippet or a rendered transcript these read as angle-bracket noise, so we
+ * normalise them away. The registry is shared across agents; tag names are
+ * distinct, so applying it in any agent's path is harmless.
  *
  * This is a deliberately CLOSED registry, not a generic XML stripper: agents
  * talk about real XML/HTML and write code full of `<` and `>`, so we only ever
@@ -30,6 +32,13 @@ export const HARNESS_TAGS: Record<string, TagStrategy> = {
   'local-command-stderr': 'unwrap',
   // Pure boilerplate the harness prepends to local-command messages — no value.
   'local-command-caveat': 'drop',
+
+  // Codex preamble blocks injected into the first user turn (machine context and
+  // harness settings — not conversation). The AGENTS.md/<INSTRUCTIONS> project
+  // preamble is deliberately NOT listed: it's real content worth searching.
+  'environment_context': 'drop',
+  'collaboration_mode': 'drop',
+  'skills_instructions': 'drop',
 };
 
 const TAG_NAMES = Object.keys(HARNESS_TAGS);
@@ -67,6 +76,9 @@ export function stripHarnessTags(text: string): string {
 
   // 3. Unwrap remaining registry tags, keeping their inner text.
   out = out.replace(new RegExp(`</?(?:${TAG_ALTERNATION})\\b[^>]*>`, 'g'), '');
+
+  // 4. Tidy the blank-line gaps left where dropped blocks used to be.
+  out = out.replace(/\n{3,}/g, '\n\n');
 
   return out.trim();
 }
