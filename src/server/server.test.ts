@@ -80,6 +80,10 @@ function makeDeps(overrides: Partial<ServerDeps> = {}): ServerDeps {
       void limit;
       return [{ ...fakeResult, snippet: `result for: ${q}` }];
     },
+    getRecent: (limit) => {
+      void limit;
+      return [{ ...fakeResult, snippet: 'recent session' }];
+    },
     getSession: (sessionId) => ({ ...fakeSession, sessionId }),
     getStatus: () => fakeStatus,
     ...overrides,
@@ -183,6 +187,65 @@ describe('GET /api/search', () => {
     } finally {
       await c();
     }
+  });
+});
+
+describe('GET /api/recent', () => {
+  let url: string;
+  let close: () => Promise<void>;
+
+  beforeEach(async () => {
+    ({ url, close } = await startTestServer(makeDeps()));
+  });
+  afterEach(async () => {
+    await close();
+  });
+
+  it('returns the recent sessions', async () => {
+    const res = await fetch(`${url}/api/recent`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as SearchResult[];
+    expect(Array.isArray(body)).toBe(true);
+    expect(body[0]?.snippet).toBe('recent session');
+  });
+
+  it('passes limit to getRecent', async () => {
+    const calls: Array<number | undefined> = [];
+    const deps = makeDeps({
+      getRecent: (limit) => {
+        calls.push(limit);
+        return [];
+      },
+    });
+    const { url: u, close: c } = await startTestServer(deps);
+    try {
+      await fetch(`${u}/api/recent?limit=7`);
+      expect(calls[0]).toBe(7);
+    } finally {
+      await c();
+    }
+  });
+
+  it('omits limit when not provided', async () => {
+    const calls: Array<number | undefined> = [];
+    const deps = makeDeps({
+      getRecent: (limit) => {
+        calls.push(limit);
+        return [];
+      },
+    });
+    const { url: u, close: c } = await startTestServer(deps);
+    try {
+      await fetch(`${u}/api/recent`);
+      expect(calls[0]).toBeUndefined();
+    } finally {
+      await c();
+    }
+  });
+
+  it('returns 400 for a non-positive or non-integer limit', async () => {
+    expect((await fetch(`${url}/api/recent?limit=0`)).status).toBe(400);
+    expect((await fetch(`${url}/api/recent?limit=abc`)).status).toBe(400);
   });
 });
 

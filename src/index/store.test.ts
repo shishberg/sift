@@ -314,6 +314,53 @@ describe('Store', () => {
     });
   });
 
+  describe('recentSessions', () => {
+    it('returns an empty array for an empty store', () => {
+      expect(store.recentSessions()).toEqual([]);
+    });
+
+    it('returns one row per session, ordered by most recent message desc', () => {
+      // s1: oldest first message, but its latest message is the newest overall.
+      store.addChunk(makeChunk({ sessionId: 's1', lineNumber: 1, text: 's1 first', timestamp: '2026-01-01T00:00:01Z' }));
+      store.addChunk(makeChunk({ sessionId: 's1', lineNumber: 2, text: 's1 latest', timestamp: '2026-01-01T00:00:09Z' }));
+      // s2: a single message in the middle.
+      store.addChunk(makeChunk({ sessionId: 's2', lineNumber: 1, text: 's2 only', timestamp: '2026-01-01T00:00:05Z' }));
+
+      const rows = store.recentSessions();
+      expect(rows.map((r) => r.sessionId)).toEqual(['s1', 's2']);
+    });
+
+    it('uses the most recent message as the snippet and its locator', () => {
+      store.addChunk(makeChunk({ sessionId: 's1', lineNumber: 1, text: 'old', timestamp: '2026-01-01T00:00:01Z' }));
+      store.addChunk(makeChunk({ sessionId: 's1', lineNumber: 7, text: 'newest', timestamp: '2026-01-01T00:00:09Z' }));
+
+      const [row] = store.recentSessions();
+      expect(row?.snippet).toBe('newest');
+      expect(row?.lineNumber).toBe(7);
+      expect(row?.timestamp).toBe('2026-01-01T00:00:09Z');
+    });
+
+    it('respects the limit', () => {
+      for (let i = 0; i < 5; i++) {
+        store.addChunk(makeChunk({ sessionId: `s${i}`, lineNumber: 1, text: `msg ${i}`, timestamp: `2026-01-01T00:00:0${i}Z` }));
+      }
+      expect(store.recentSessions(2)).toHaveLength(2);
+    });
+
+    it('resolves the session cwd when recorded', () => {
+      store.addChunk(makeChunk({ sessionId: 's1', filePath: '/logs/s1.jsonl', text: 'hi' }));
+      store.setSourceFileCwd('/logs/s1.jsonl', '/home/dave/proj', 'claude');
+
+      const [row] = store.recentSessions();
+      expect(row?.cwd).toBe('/home/dave/proj');
+    });
+
+    it("returns '' for cwd when none is recorded", () => {
+      store.addChunk(makeChunk({ sessionId: 's1', text: 'hi' }));
+      expect(store.recentSessions()[0]?.cwd).toBe('');
+    });
+  });
+
   describe('source_files', () => {
     it('getSourceFile returns undefined for unknown path', () => {
       expect(store.getSourceFile('/unknown/path')).toBeUndefined();

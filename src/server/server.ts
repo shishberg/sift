@@ -44,6 +44,8 @@ export interface StatusResponse {
 /** Injected dependencies — all pure function-shaped so tests can pass fakes. */
 export interface ServerDeps {
   search: (query: string, limit?: number) => Promise<SearchResult[]>;
+  /** Most recently touched sessions (no query), newest message first. */
+  getRecent: (limit?: number) => SearchResult[];
   getSession: (sessionId: string) => SessionResponse;
   getStatus: () => StatusResponse;
 }
@@ -98,6 +100,19 @@ function jsonError(res: http.ServerResponse, status: number, message: string): v
   res.end(JSON.stringify({ error: message }));
 }
 
+/**
+ * Parse an optional `limit` query param. Returns the number, `undefined` when
+ * absent, or a sentinel `'invalid'` when present but not a positive integer so
+ * the caller can return 400.
+ */
+function parseLimit(searchParams: URLSearchParams): number | undefined | 'invalid' {
+  const limitStr = searchParams.get('limit');
+  if (limitStr === null) return undefined;
+  const parsed = parseInt(limitStr, 10);
+  if (isNaN(parsed) || parsed <= 0) return 'invalid';
+  return parsed;
+}
+
 async function handleApi(
   pathname: string,
   searchParams: URLSearchParams,
@@ -111,18 +126,24 @@ async function handleApi(
       jsonError(res, 400, 'q parameter is required and must not be blank');
       return;
     }
-    const limitStr = searchParams.get('limit');
-    let limit: number | undefined;
-    if (limitStr !== null) {
-      const parsed = parseInt(limitStr, 10);
-      if (isNaN(parsed) || parsed <= 0) {
-        jsonError(res, 400, 'limit must be a positive integer');
-        return;
-      }
-      limit = parsed;
+    const limit = parseLimit(searchParams);
+    if (limit === 'invalid') {
+      jsonError(res, 400, 'limit must be a positive integer');
+      return;
     }
     const results = await deps.search(q, limit);
     jsonOk(res, results);
+    return;
+  }
+
+  // GET /api/recent?limit=<n> — most recently touched sessions (no query).
+  if (pathname === '/api/recent') {
+    const limit = parseLimit(searchParams);
+    if (limit === 'invalid') {
+      jsonError(res, 400, 'limit must be a positive integer');
+      return;
+    }
+    jsonOk(res, deps.getRecent(limit));
     return;
   }
 

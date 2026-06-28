@@ -832,6 +832,12 @@ async function main(): Promise<void> {
           // Make cwd $HOME-relative for display, matching the session endpoint.
           return results.map((r) => ({ ...r, cwd: homeRelative(r.cwd, homedir()) }));
         },
+        getRecent: (limit) =>
+          // Recent sessions reuse the SearchResult shape (score is unused here);
+          // make cwd $HOME-relative like the search/session endpoints.
+          store
+            .recentSessions(limit)
+            .map((r) => ({ ...r, score: 0, cwd: homeRelative(r.cwd, homedir()) })),
         getSession: (sessionId) => {
           const items = readTranscript(sessionId, {
             getSessionFiles: (id) => store.getSessionFiles(id),

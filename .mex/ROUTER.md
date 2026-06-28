@@ -56,7 +56,11 @@ See `context/impl-spec.md` for the concrete build and `context/decisions.md` for
   clamped 260px–min(60%,760px)); sidebar and main scroll independently (root is `h-screen`,
   panels `overflow-y-auto`). Results are real links (cmd/middle-click opens a new tab); clicking
   one opens the session in the main panel and carries `q` along in the URL. The query lives in
-  the URL (`?q=…`) so back-nav restores it, plus a localStorage recent-search dropdown. `/` shows
+  the URL (`?q=…`) so back-nav restores it, plus a localStorage recent-search dropdown.
+  With no query the sidebar lists the most recently touched sessions (distinct sessions ordered by
+  most recent message; one row per session previewing that latest message) from `GET /api/recent`
+  (`store.recentSessions`, a per-session `ROW_NUMBER()` window). The search box shows an `X` clear
+  button while a query is present; clearing drops `q` and reverts to the recent list. `/` shows
   a welcome placeholder (`web/src/views/SearchView.vue`); `/session/:id` shows the transcript. The
   session view has NO line numbers. The session view renders a FAITHFUL transcript read
   from the raw log (not the lossy index): `/api/session/:id` → `src/render/` parses each of the

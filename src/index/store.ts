@@ -3,7 +3,7 @@ import * as sqliteVec from 'sqlite-vec';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
-import type { Chunk, JsonlAgentType } from '../types.js';
+import type { AgentType, Chunk, JsonlAgentType } from '../types.js';
 
 /** Embedding dimension for nomic-embed-text. One place to change if the model changes. */
 export const EMBED_DIMS = 768;
@@ -18,6 +18,26 @@ export interface SourceFile {
   lastLineNumber: number;
   /** Working directory the session ran in, captured from the log. Undefined until known. */
   cwd?: string;
+}
+
+/**
+ * A session summary for the "recently touched" sidebar list. Shaped to match
+ * SearchResult (minus score) so the web layer can render it the same way: it is
+ * the session's most recent message, used as both the preview snippet and the
+ * source locator the row links to.
+ */
+export interface RecentSession {
+  sessionId: string;
+  agentType: AgentType;
+  filePath: string;
+  lineNumber: number;
+  role: 'user' | 'assistant' | 'tool';
+  /** Text of the most recent message in the session. */
+  snippet: string;
+  /** Timestamp of the most recent message — the value the list is ordered by. */
+  timestamp: string;
+  /** Working directory the session ran in ('' if unknown). Absolute here. */
+  cwd: string;
 }
 
 export interface EmbedModelCheck {
@@ -80,6 +100,7 @@ export class Store {
   private readonly stmtGetChunk: Database.Statement;
   private readonly stmtGetSessionChunks: Database.Statement;
   private readonly stmtGetSessionFiles: Database.Statement;
+  private readonly stmtRecentSessions: Database.Statement;
 
   // Cached transactions.
   private readonly txnBatch: (items: Array<{ chunk: Chunk }>) => number[];
@@ -219,6 +240,35 @@ export class Store {
       FROM   chunks
       WHERE  session_id = ?
       ORDER  BY file_path
+    `);
+
+    // Most recent message per session, newest first. The window picks one row
+    // per session_id (the latest by timestamp, id as a tiebreak); the correlated
+    // subquery resolves cwd the same way getSessionCwd does.
+    this.stmtRecentSessions = this.db.prepare(`
+      SELECT
+        recent.session_id  AS sessionId,
+        recent.agent_type  AS agentType,
+        recent.file_path   AS filePath,
+        recent.line_number AS lineNumber,
+        recent.role        AS role,
+        recent.text        AS snippet,
+        recent.timestamp   AS timestamp,
+        (
+          SELECT sf.cwd FROM source_files sf
+          WHERE sf.cwd IS NOT NULL
+            AND sf.path IN (SELECT DISTINCT file_path FROM chunks WHERE session_id = recent.session_id)
+          LIMIT 1
+        ) AS cwd
+      FROM (
+        SELECT
+          session_id, agent_type, file_path, line_number, role, text, timestamp,
+          ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY timestamp DESC, id DESC) AS rn
+        FROM chunks
+      ) AS recent
+      WHERE recent.rn = 1
+      ORDER BY recent.timestamp DESC
+      LIMIT ?
     `);
 
     // ---- transactions ----
@@ -511,6 +561,34 @@ export class Store {
   getSessionFiles(sessionId: string): { filePath: string; agentType: string }[] {
     const rows = this.stmtGetSessionFiles.all(sessionId) as { filePath: string; agentType: string }[];
     return rows;
+  }
+
+  /**
+   * The most recently touched sessions: one row per session (its most recent
+   * message), ordered by that message's timestamp descending. Used to populate
+   * the sidebar when there is no search query.
+   */
+  recentSessions(limit = 30): RecentSession[] {
+    const rows = this.stmtRecentSessions.all(limit) as Array<{
+      sessionId: string;
+      agentType: string;
+      filePath: string;
+      lineNumber: number;
+      role: string;
+      snippet: string;
+      timestamp: string;
+      cwd: string | null;
+    }>;
+    return rows.map((r) => ({
+      sessionId: r.sessionId,
+      agentType: r.agentType as AgentType,
+      filePath: r.filePath,
+      lineNumber: r.lineNumber,
+      role: r.role as RecentSession['role'],
+      snippet: r.snippet,
+      timestamp: r.timestamp,
+      cwd: r.cwd ?? '',
+    }));
   }
 
   // ------------------------------------------------------------------ embed guard

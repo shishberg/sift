@@ -7,6 +7,7 @@ const route = useRoute();
 const router = useRouter();
 const query = ref('');
 const results = ref<SearchResult[]>([]);
+const recent = ref<SearchResult[]>([]);
 const loading = ref(false);
 const error = ref('');
 const searched = ref(false);
@@ -55,6 +56,28 @@ const suggestions = computed((): string[] => {
   return items.slice(0, 8);
 });
 
+// ── Recent sessions (shown when there's no search query) ──────────────────
+async function loadRecent(): Promise<void> {
+  loading.value = true;
+  error.value = '';
+
+  try {
+    const res = await fetch('/api/recent?limit=30');
+    if (!res.ok) {
+      const body = (await res.json()) as { error?: string };
+      error.value = body.error ?? `Server error: ${res.status}`;
+      recent.value = [];
+      return;
+    }
+    recent.value = (await res.json()) as SearchResult[];
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Could not reach the server.';
+    recent.value = [];
+  } finally {
+    loading.value = false;
+  }
+}
+
 // ── Search ────────────────────────────────────────────────────────────────
 async function runSearch(q: string): Promise<void> {
   loading.value = true;
@@ -97,6 +120,18 @@ function pickSuggestion(term: string): void {
   submit();
 }
 
+// Clear the search box and drop `q` from the URL → the watcher reloads recent
+// sessions. Keeps any open session (and its file/line) in place.
+function clearSearch(): void {
+  query.value = '';
+  showHistory.value = false;
+  if (!route.query.q) {
+    void loadRecent(); // no q in URL — watcher won't fire, refresh directly
+  } else {
+    void router.push({ query: { ...route.query, q: undefined } });
+  }
+}
+
 // React to the URL's q param: covers first load, shared links, the back
 // button, and navigating between sessions (q is carried along).
 watch(
@@ -104,11 +139,12 @@ watch(
   (q) => {
     const term = typeof q === 'string' ? q : '';
     if (!term) {
-      // Navigated home (e.g. the logo) — reset to a clean sidebar.
+      // No query — show the most recently touched sessions instead.
       query.value = '';
       results.value = [];
       searched.value = false;
       error.value = '';
+      void loadRecent();
       return;
     }
     if (term !== query.value) query.value = term;
@@ -158,6 +194,9 @@ function formatResultTime(iso: string): string {
 }
 
 const resultCount = computed(() => results.value.length);
+
+// When there's no active search we show recent sessions; both use the same row.
+const displayList = computed(() => (searched.value ? results.value : recent.value));
 </script>
 
 <template>
@@ -178,6 +217,7 @@ const resultCount = computed(() => results.value.length);
             class="w-full rounded-md border px-3 py-2 outline-none transition-shadow"
             style="
               font-size: 14px;
+              padding-right: 30px;
               background: var(--white);
               border-color: var(--border);
               color: var(--fg);
@@ -191,6 +231,34 @@ const resultCount = computed(() => results.value.length);
             @blur="showHistory = false"
             @keydown.escape="showHistory = false"
           />
+
+          <!-- Clear button — shows when there's a query; clears it and shows recent. -->
+          <button
+            v-if="query"
+            type="button"
+            aria-label="Clear search"
+            @mousedown.prevent
+            @click="clearSearch"
+            style="
+              position: absolute;
+              right: 8px;
+              top: 50%;
+              transform: translateY(-50%);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              width: 20px;
+              height: 20px;
+              padding: 0;
+              border: none;
+              border-radius: 4px;
+              background: transparent;
+              color: var(--muted-fg);
+              font-size: 18px;
+              line-height: 1;
+              cursor: pointer;
+            "
+          >×</button>
 
           <!-- Recent searches -->
           <ul v-if="showHistory && suggestions.length" class="history-dropdown">
@@ -242,19 +310,22 @@ const resultCount = computed(() => results.value.length);
         {{ error }}
       </div>
 
-      <template v-if="!error && searched">
-        <!-- Count -->
+      <template v-if="!error">
+        <!-- Header: result count when searching, else a recent-sessions label. -->
         <div
           v-if="!loading"
           class="mb-2 px-1"
           style="font-size: 11px; color: var(--muted-fg); letter-spacing: 0.02em"
         >
-          {{ resultCount === 0 ? 'No results' : `${resultCount} result${resultCount === 1 ? '' : 's'}` }}
+          <template v-if="searched">
+            {{ resultCount === 0 ? 'No results' : `${resultCount} result${resultCount === 1 ? '' : 's'}` }}
+          </template>
+          <template v-else>Recent sessions</template>
         </div>
 
-        <!-- Empty state -->
+        <!-- Empty state: no search results -->
         <div
-          v-if="!loading && resultCount === 0"
+          v-if="!loading && searched && resultCount === 0"
           class="px-1"
           style="color: var(--muted-fg); font-size: 13px"
         >
@@ -265,10 +336,23 @@ const resultCount = computed(() => results.value.length);
           to index your sessions first.
         </div>
 
-        <!-- Result list -->
-        <ul v-if="!loading && resultCount > 0" class="flex flex-col" style="gap: 2px; list-style: none; padding: 0; margin: 0">
+        <!-- Empty state: nothing indexed yet -->
+        <div
+          v-else-if="!loading && !searched && displayList.length === 0"
+          class="px-1"
+          style="color: var(--muted-fg); font-size: 13px"
+        >
+          No sessions indexed yet. Run
+          <code class="font-mono" style="font-size: 12px; background: var(--surface); padding: 1px 4px; border-radius: 3px">
+            agent-search index
+          </code>
+          to index your sessions.
+        </div>
+
+        <!-- List: search results or recent sessions (same row shape). -->
+        <ul v-if="!loading && displayList.length > 0" class="flex flex-col" style="gap: 2px; list-style: none; padding: 0; margin: 0">
           <li
-            v-for="result in results"
+            v-for="result in displayList"
             :key="`${result.sessionId}:${result.lineNumber}`"
           >
             <RouterLink
@@ -325,15 +409,6 @@ const resultCount = computed(() => results.value.length);
           </li>
         </ul>
       </template>
-
-      <!-- Before first search -->
-      <div
-        v-if="!searched && !error"
-        class="px-1 mt-2"
-        style="color: var(--muted-fg); font-size: 13px; line-height: 1.7"
-      >
-        Search across Claude, Codex, opencode, and pi session logs.
-      </div>
     </div>
   </div>
 </template>
