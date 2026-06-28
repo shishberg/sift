@@ -24,4 +24,15 @@ describe('parsePiTranscript', () => {
     expect(items[1].tool).toEqual({ name: 'bash', input: '{"command":"ls"}', output: 'a\nb', isError: false });
     expect(items[1].lineNumbers).toEqual([1, 2]);
   });
+
+  it('marks a failed tool result as isError', () => {
+    const items = parsePiTranscript(
+      lines(
+        { type: 'message', timestamp: 't1', message: { role: 'assistant', content: [{ type: 'toolCall', id: 'call_1', name: 'bash', arguments: {} }] } },
+        { type: 'message', timestamp: 't2', message: { role: 'toolResult', toolCallId: 'call_1', isError: true, content: [{ type: 'text', text: 'boom' }] } },
+      ),
+      FP,
+    );
+    expect(items[0].tool).toEqual({ name: 'bash', input: '{}', output: 'boom', isError: true });
+  });
 });

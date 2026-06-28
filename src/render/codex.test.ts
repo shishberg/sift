@@ -33,4 +33,15 @@ describe('parseCodexTranscript', () => {
     );
     expect(items.map((i) => [i.role, i.text])).toEqual([['assistant', 'done']]);
   });
+
+  it('keeps a non-string (array) function_call_output as JSON text', () => {
+    const items = parseCodexTranscript(
+      lines(
+        { type: 'response_item', timestamp: 't1', payload: { type: 'function_call', name: 'screenshot', arguments: '{}', call_id: 'c1' } },
+        { type: 'response_item', timestamp: 't2', payload: { type: 'function_call_output', call_id: 'c1', output: [{ type: 'input_image', image_url: 'data:...' }] } },
+      ),
+      FP,
+    );
+    expect(items[0].tool?.output).toBe('[{"type":"input_image","image_url":"data:..."}]');
+  });
 });

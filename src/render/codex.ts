@@ -1,5 +1,12 @@
 import type { TranscriptItem } from '../types.js';
 
+/** Codex tool output is usually a string but can be structured (e.g. image blocks). */
+function codexOutputText(output: unknown): string {
+  if (typeof output === 'string') return output;
+  if (output == null) return '';
+  return JSON.stringify(output);
+}
+
 /**
  * Parse a full codex JSONL transcript faithfully: untruncated message text,
  * function_call paired with function_call_output (by call_id). developer
@@ -45,7 +52,7 @@ export function parseCodexTranscript(lines: string[], filePath: string): Transcr
       if (callId) toolIndexByCallId.set(callId, items.length - 1);
     } else if (payloadType === 'function_call_output') {
       const callId = payload['call_id'] as string | undefined;
-      const output = (payload['output'] as string | undefined) ?? '';
+      const output = codexOutputText(payload['output']);
       const idx = callId !== undefined ? toolIndexByCallId.get(callId) : undefined;
       if (idx !== undefined && items[idx]?.tool) {
         items[idx].tool!.output = output;

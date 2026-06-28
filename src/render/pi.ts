@@ -31,15 +31,16 @@ export function parsePiTranscript(lines: string[], filePath: string): Transcript
     if (role === 'toolResult') {
       const id = message['toolCallId'] as string | undefined;
       const output = resultText(message['content']);
+      const isError = message['isError'] === true;
       const idx = id !== undefined ? toolIndexById.get(id) : undefined;
       if (idx !== undefined && items[idx]?.tool) {
         items[idx].tool!.output = output;
-        items[idx].tool!.isError = false;
+        items[idx].tool!.isError = isError;
         items[idx].lineNumbers.push(lineNumber);
         // One result per call; a later duplicate id becomes an orphan.
         if (id !== undefined) toolIndexById.delete(id);
       } else {
-        items.push({ role: 'tool', text: '', tool: { name: '', input: '', output, isError: false }, filePath, lineNumbers: [lineNumber], timestamp });
+        items.push({ role: 'tool', text: '', tool: { name: '', input: '', output, isError }, filePath, lineNumbers: [lineNumber], timestamp });
       }
       return;
     }
