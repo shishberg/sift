@@ -51,6 +51,8 @@ export function parseCodexTranscript(lines: string[], filePath: string): Transcr
         items[idx].tool!.output = output;
         items[idx].tool!.isError = false;
         items[idx].lineNumbers.push(lineNumber);
+        // One result per call; a later duplicate call_id becomes an orphan.
+        if (callId !== undefined) toolIndexByCallId.delete(callId);
       } else {
         items.push({ role: 'tool', text: '', tool: { name: '', input: '', output, isError: false }, filePath, lineNumbers: [lineNumber], timestamp });
       }

@@ -36,6 +36,8 @@ export function parsePiTranscript(lines: string[], filePath: string): Transcript
         items[idx].tool!.output = output;
         items[idx].tool!.isError = false;
         items[idx].lineNumbers.push(lineNumber);
+        // One result per call; a later duplicate id becomes an orphan.
+        if (id !== undefined) toolIndexById.delete(id);
       } else {
         items.push({ role: 'tool', text: '', tool: { name: '', input: '', output, isError: false }, filePath, lineNumbers: [lineNumber], timestamp });
       }

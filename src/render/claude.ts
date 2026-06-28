@@ -60,6 +60,9 @@ export function parseClaudeTranscript(lines: string[], filePath: string): Transc
           items[idx].tool!.output = output;
           items[idx].tool!.isError = isError;
           items[idx].lineNumbers.push(lineNumber);
+          // Each call pairs with at most one result; a later duplicate id
+          // becomes an orphan instead of overwriting the first result.
+          if (id !== undefined) toolIndexById.delete(id);
         } else {
           // Orphan result (call in another file or out of order): standalone item.
           items.push({ role: 'tool', text: '', tool: { name: '', input: '', output, isError }, filePath, lineNumbers: [lineNumber], timestamp });
