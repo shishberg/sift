@@ -13,7 +13,7 @@ import * as path from 'node:path';
 import { createServer, DEFAULT_PORT } from './server.js';
 import type { ServerDeps, SessionResponse, StatusResponse } from './server.js';
 import type { SearchResult } from '../search/search.js';
-import type { Chunk } from '../types.js';
+import type { TranscriptItem } from '../types.js';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -35,14 +35,13 @@ async function startTestServer(
 // Fake data
 // ---------------------------------------------------------------------------
 
-const fakeChunk: Chunk = {
-  agentType: 'claude',
-  sessionId: 'ses-abc123',
-  filePath: '/home/user/.claude/projects/foo/ses-abc123.jsonl',
-  lineNumber: 5,
+const fakeItem: TranscriptItem = {
   role: 'user',
-  text: 'Hello world',
-  timestamp: '2024-01-01T00:00:00.000Z',
+  text: 'hi',
+  tool: undefined,
+  filePath: '/logs/s.jsonl',
+  lineNumbers: [1],
+  timestamp: 't',
 };
 
 const fakeResult: SearchResult = {
@@ -58,9 +57,10 @@ const fakeResult: SearchResult = {
 
 const fakeSession: SessionResponse = {
   sessionId: 'ses-abc123',
-  filePath: '/home/user/.claude/projects/foo/ses-abc123.jsonl',
-  cwd: '/home/user/src/foo',
-  chunks: [fakeChunk],
+  agentType: 'claude',
+  filePath: '/logs/s.jsonl',
+  cwd: '~/proj',
+  items: [fakeItem],
 };
 
 const fakeStatus: StatusResponse = {
@@ -210,9 +210,10 @@ describe('GET /api/session/:id', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as SessionResponse;
     expect(body.sessionId).toBe('ses-abc123');
-    expect(body.cwd).toBe('/home/user/src/foo');
-    expect(Array.isArray(body.chunks)).toBe(true);
-    expect(body.chunks[0]?.role).toBe('user');
+    expect(body.cwd).toBe('~/proj');
+    expect(body.agentType).toBe('claude');
+    expect(Array.isArray(body.items)).toBe(true);
+    expect(body.items[0]?.text).toBe('hi');
   });
 
   it('passes the session id to getSession', async () => {

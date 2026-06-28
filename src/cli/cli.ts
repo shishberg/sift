@@ -8,9 +8,11 @@
  */
 
 import { fileURLToPath } from 'node:url';
-import { realpathSync, existsSync } from 'node:fs';
+import { realpathSync, existsSync, readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { homedir } from 'node:os';
+import { readTranscript } from '../render/transcript.js';
+import type { Chunk } from '../types.js';
 import { Store } from '../index/store.js';
 import { OllamaEmbedder } from '../embed/ollama.js';
 import { assertEmbedModel } from '../embed/guard.js';
@@ -20,7 +22,6 @@ import { Watcher } from '../ingest/watcher.js';
 import { search, type SearchResult } from '../search/search.js';
 import { startServer, DEFAULT_PORT } from '../server/server.js';
 import { OpenCodeSource, DEFAULT_OPENCODE_DB_PATH } from '../sources/opencode.js';
-import type { Chunk } from '../types.js';
 
 // ---------------------------------------------------------------------------
 // Help text
@@ -706,12 +707,26 @@ async function main(): Promise<void> {
       {
         search: (q, limit) => search(q, { store, embedder }, { limit }),
         getSession: (sessionId) => {
-          const chunks = store.getSessionChunks(sessionId);
+          const items = readTranscript(sessionId, {
+            getSessionFiles: (id) => store.getSessionFiles(id),
+            readFile: (p) => readFileSync(p, 'utf8'),
+            openTranscript: (id) => {
+              const source = new OpenCodeSource();
+              try {
+                return source.readTranscript(id);
+              } finally {
+                source.close();
+              }
+            },
+          });
+          const files = store.getSessionFiles(sessionId);
+          const realFile = files.find((f) => f.agentType !== 'opencode')?.filePath ?? files[0]?.filePath ?? '';
           return {
             sessionId,
-            filePath: chunks[0]?.filePath ?? '',
+            agentType: files[0]?.agentType ?? null,
+            filePath: realFile,
             cwd: homeRelative(store.getSessionCwd(sessionId) ?? '', homedir()),
-            chunks,
+            items,
           };
         },
         getStatus: () => store.queueStats(),

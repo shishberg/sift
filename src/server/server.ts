@@ -18,7 +18,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { SearchResult } from '../search/search.js';
-import type { Chunk } from '../types.js';
+import type { TranscriptItem } from '../types.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -26,11 +26,13 @@ import type { Chunk } from '../types.js';
 
 export interface SessionResponse {
   sessionId: string;
-  /** First file path seen in this session's chunks (may be '' if no chunks). */
+  /** Agent that produced the session; null if unknown. */
+  agentType: string | null;
+  /** First real log file path (for the copy-path button). '' if none. */
   filePath: string;
-  /** Working directory the session ran in; '' if not recorded. */
+  /** Working directory relative to $HOME; '' if not recorded. */
   cwd: string;
-  chunks: Chunk[];
+  items: TranscriptItem[];
 }
 
 export interface StatusResponse {
