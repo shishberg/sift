@@ -137,14 +137,17 @@ function makeSnippet(chunk: Chunk): string {
  * @param deps.store     Index store (injected so tests can use `:memory:`).
  * @param deps.embedder  Local embedder (injected so tests can pass fakes).
  * @param opts.limit     Max results returned (default 20).
+ * @param opts.cwd       When set (absolute path), restrict results to sessions
+ *                       that ran in that working directory.
  */
 export async function search(
   query: string,
   deps: { store: Store; embedder: Embedder },
-  opts?: { limit?: number },
+  opts?: { limit?: number; cwd?: string },
 ): Promise<SearchResult[]> {
   const limit = opts?.limit ?? DEFAULT_LIMIT;
   const poolSize = Math.max(limit, POOL_SIZE);
+  const cwd = opts?.cwd;
 
   const { store, embedder } = deps;
 
@@ -156,11 +159,11 @@ export async function search(
   // "foo:bar", unmatched quotes). sanitizeFtsQuery wraps each token in double
   // quotes so those cases become literal phrase searches that always parse
   // correctly. The try/catch is kept as a final safety net.
-  const vecResults = store.vecSearch(queryEmbedding, poolSize);
+  const vecResults = store.vecSearch(queryEmbedding, poolSize, cwd);
   let ftsResults: Array<{ id: number; rank: number }>;
   try {
     const safeQuery = sanitizeFtsQuery(query);
-    ftsResults = safeQuery.length > 0 ? store.ftsSearch(safeQuery, poolSize) : [];
+    ftsResults = safeQuery.length > 0 ? store.ftsSearch(safeQuery, poolSize, cwd) : [];
   } catch {
     ftsResults = [];
   }

@@ -10,6 +10,7 @@ import {
   HELP_TEXT,
   parseCli,
   homeRelative,
+  resolveCwd,
 } from './cli.js';
 import type { SearchResult } from '../search/search.js';
 import type { Chunk } from '../types.js';
@@ -558,6 +559,41 @@ describe('parseCli', () => {
     expect(args.query).toBe('my query');
   });
 
+  it('parses --cwd and strips it (and its value) from the query', () => {
+    const args = parseCli(['my query', '--cwd', '~/src/foo']);
+    expect(args.command).toBe('search');
+    expect(args.cwd).toBe('~/src/foo');
+    expect(args.all).toBe(false);
+    expect(args.query).toBe('my query');
+  });
+
+  it('records a bare --cwd as empty string for main() to reject', () => {
+    const args = parseCli(['my query', '--cwd']);
+    expect(args.cwd).toBe('');
+    expect(args.query).toBe('my query');
+  });
+
+  it('parses --all and strips it from the query', () => {
+    const args = parseCli(['my query', '--all']);
+    expect(args.all).toBe(true);
+    expect(args.cwd).toBeUndefined();
+    expect(args.query).toBe('my query');
+  });
+
+  it('leaves cwd undefined and all false when neither flag is given', () => {
+    const args = parseCli(['my query']);
+    expect(args.cwd).toBeUndefined();
+    expect(args.all).toBe(false);
+  });
+
+  it('parses --cwd together with --limit and --format', () => {
+    const args = parseCli(['my query', '--limit', '5', '--cwd', '.', '--format', 'json']);
+    expect(args.limit).toBe(5);
+    expect(args.format).toBe('json');
+    expect(args.cwd).toBe('.');
+    expect(args.query).toBe('my query');
+  });
+
   it('parses the show subcommand with a session id', () => {
     const args = parseCli(['show', 'sess-abc123']);
     expect(args.command).toBe('show');
@@ -759,5 +795,34 @@ describe('homeRelative', () => {
 
   it('returns empty string for empty input', () => {
     expect(homeRelative('', '/Users/agent')).toBe('');
+  });
+});
+
+describe('resolveCwd', () => {
+  const base = '/Users/agent/src/agent-search';
+  const home = '/Users/agent';
+
+  it('returns an absolute path unchanged', () => {
+    expect(resolveCwd('/tmp/x', base, home)).toBe('/tmp/x');
+  });
+
+  it('expands a bare ~ to home', () => {
+    expect(resolveCwd('~', base, home)).toBe('/Users/agent');
+  });
+
+  it('expands a leading ~/ to home', () => {
+    expect(resolveCwd('~/src/foo', base, home)).toBe('/Users/agent/src/foo');
+  });
+
+  it('resolves . against the base directory', () => {
+    expect(resolveCwd('.', base, home)).toBe(base);
+  });
+
+  it('resolves a relative path against the base directory', () => {
+    expect(resolveCwd('../other', base, home)).toBe('/Users/agent/src/other');
+  });
+
+  it('returns empty string for empty input', () => {
+    expect(resolveCwd('', base, home)).toBe('');
   });
 });

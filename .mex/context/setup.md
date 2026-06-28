@@ -46,7 +46,8 @@ Do not commit actual values.
 
 ## Common Commands
 - Index / watch: `agent-search index`, `agent-search watch`, `agent-search status`
-- Search / read: `agent-search <query> [--limit N] [--format json]`, `agent-search show <id> [--tools]`
+- Search / read: `agent-search <query> [--limit N] [--format json] [--cwd PATH | --all]`, `agent-search show <id> [--tools]`
+  (search defaults to the current directory's sessions; `--all` searches everywhere, `--cwd PATH` scopes elsewhere)
 - Web app: `agent-search serve [--port N] [--watch]`; dev frontend `npm run web:dev`, build `npm run web:build`
 - Tests / types: `npm test` (vitest), `npm run test:watch`, `npm run typecheck`
 

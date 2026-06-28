@@ -44,7 +44,10 @@ See `context/impl-spec.md` for the concrete build and `context/decisions.md` for
   backfill = the watcher's startup scan (not a separate op)
 - Local embedder: ollama `nomic-embed-text`, with task prefixes + a model/dims guard
 - Hybrid search: vec + FTS5 merged with RRF (k=60); FTS queries sanitized for punctuation
-- CLI: search, show, index, watch, status, serve (+ live progress bar)
+- CLI: search, show, index, watch, status, serve (+ live progress bar). Search
+  is scoped to the current directory by default; `--all` searches everywhere,
+  `--cwd PATH` scopes elsewhere (cwd-filtered vec/FTS variants in the store via
+  `rowid IN`; sqlite-vec filters before KNN). Web `/api/search` stays unscoped.
 - Working directory per session: captured at ingest via `adapter.extractCwd` (claude/codex/pi)
   or opencode's `session.directory`, stored on `source_files.cwd`, resolved per session by
   joining chunks→source_files. A one-time `backfillCwd` (run at index/watch/serve startup)

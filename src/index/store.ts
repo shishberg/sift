@@ -8,6 +8,16 @@ import type { AgentType, Chunk, JsonlAgentType } from '../types.js';
 /** Embedding dimension for nomic-embed-text. One place to change if the model changes. */
 export const EMBED_DIMS = 768;
 
+/**
+ * Subquery (one `?` bind = an absolute cwd) yielding the chunk ids of every
+ * session that ran in that directory. cwd is stored on source_files, so we go
+ * cwd → file paths → chunk ids. Used to scope vec/FTS search to one cwd.
+ */
+const CHUNK_IDS_IN_CWD = `
+  SELECT id FROM chunks
+  WHERE  file_path IN (SELECT path FROM source_files WHERE cwd = ?)
+`;
+
 export interface SourceFile {
   path: string;
   agentType: JsonlAgentType;
@@ -95,8 +105,10 @@ export class Store {
   private readonly stmtGetMeta: Database.Statement;
   private readonly stmtSetMeta: Database.Statement;
   private readonly stmtFtsSearch: Database.Statement;
+  private readonly stmtFtsSearchCwd: Database.Statement;
   private readonly stmtCountVec: Database.Statement;
   private readonly stmtVecSearch: Database.Statement;
+  private readonly stmtVecSearchCwd: Database.Statement;
   private readonly stmtGetChunk: Database.Statement;
   private readonly stmtGetSessionChunks: Database.Statement;
   private readonly stmtGetSessionFiles: Database.Statement;
@@ -217,6 +229,18 @@ export class Store {
       LIMIT  ?
     `);
 
+    // cwd-filtered FTS: restrict matches to chunks whose session ran in `cwd`.
+    // cwd lives on source_files (keyed by file path), so the rowid filter maps
+    // cwd → file paths → chunk ids. Params: match, cwd, limit.
+    this.stmtFtsSearchCwd = this.db.prepare(`
+      SELECT rowid AS id, rank
+      FROM   chunks_fts
+      WHERE  chunks_fts MATCH ?
+        AND  rowid IN (${CHUNK_IDS_IN_CWD})
+      ORDER  BY rank
+      LIMIT  ?
+    `);
+
     this.stmtCountVec = this.db.prepare('SELECT COUNT(*) AS n FROM chunks_vec');
 
     this.stmtVecSearch = this.db.prepare(`
@@ -224,6 +248,18 @@ export class Store {
       FROM   chunks_vec
       WHERE  embedding MATCH ?
         AND  k = ?
+      ORDER  BY distance
+    `);
+
+    // cwd-filtered vec KNN: sqlite-vec applies the rowid filter BEFORE ranking,
+    // so this returns the k nearest *within* the cwd (not the global k then
+    // filtered). Params: embedding, k, cwd.
+    this.stmtVecSearchCwd = this.db.prepare(`
+      SELECT rowid AS id, distance
+      FROM   chunks_vec
+      WHERE  embedding MATCH ?
+        AND  k = ?
+        AND  rowid IN (${CHUNK_IDS_IN_CWD})
       ORDER  BY distance
     `);
 
@@ -540,9 +576,15 @@ export class Store {
    * Full-text search via FTS5 MATCH.
    * Returns rows ordered by FTS5 rank (negative; more-negative = better match).
    * The search layer uses this for the FTS side of RRF fusion.
+   *
+   * @param cwd  When set (absolute path), restrict matches to sessions that ran
+   *             in that working directory.
    */
-  ftsSearch(query: string, limit = 20): Array<{ id: number; rank: number }> {
-    return this.stmtFtsSearch.all(query, limit) as Array<{ id: number; rank: number }>;
+  ftsSearch(query: string, limit = 20, cwd?: string): Array<{ id: number; rank: number }> {
+    const rows = cwd
+      ? this.stmtFtsSearchCwd.all(query, cwd, limit)
+      : this.stmtFtsSearch.all(query, limit);
+    return rows as Array<{ id: number; rank: number }>;
   }
 
   /**
@@ -550,15 +592,20 @@ export class Store {
    * Returns rows ordered by distance ascending (nearest first).
    * Returns an empty array when no vec rows exist.
    * The search layer uses this for the vector side of RRF fusion.
+   *
+   * @param cwd  When set (absolute path), restrict the KNN to sessions that ran
+   *             in that working directory (filtered before ranking, so it's the
+   *             k nearest within the cwd).
    */
-  vecSearch(embedding: number[], limit = 20): Array<{ id: number; distance: number }> {
+  vecSearch(embedding: number[], limit = 20, cwd?: string): Array<{ id: number; distance: number }> {
     // Guard: sqlite-vec KNN on an empty table may throw; check first.
     const { n } = this.stmtCountVec.get() as { n: number };
     if (n === 0) return [];
-    return this.stmtVecSearch.all(JSON.stringify(embedding), limit) as Array<{
-      id: number;
-      distance: number;
-    }>;
+    const json = JSON.stringify(embedding);
+    const rows = cwd
+      ? this.stmtVecSearchCwd.all(json, limit, cwd)
+      : this.stmtVecSearch.all(json, limit);
+    return rows as Array<{ id: number; distance: number }>;
   }
 
   // ------------------------------------------------------------------ session view

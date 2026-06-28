@@ -18,15 +18,28 @@ edges:
     condition: when working with sqlite-vec or FTS5 specifics
   - target: patterns/add-cli-command.md
     condition: when exposing search through a CLI command
-last_updated: 2026-06-27
+last_updated: 2026-06-28
 ---
 
 # Search
 
 ## Query model
-Plain string in, ranked results out. No filters, operators, or query syntax in
-V1 (see `context/decisions.md`). Keep it simple; rely on ranking to surface the
-best matches.
+Plain string in, ranked results out. No operators or query syntax in the query
+string itself (see `context/decisions.md`). The one structured filter is the
+**working directory**, set out-of-band via a flag (not parsed from the query):
+the CLI scopes results to a cwd. Keep the query plain; rely on ranking to surface
+the best matches.
+
+## cwd scoping
+The CLI defaults to searching only sessions that ran in the current directory,
+with `--all` to search everywhere and `--cwd PATH` to scope to another directory
+(`resolveCwd` normalises `~`/relative/`.` to the absolute path the index stores).
+Mechanism: `search()` takes an optional `cwd`; the store has cwd-filtered variants
+of both index queries that add `rowid IN (chunk ids whose session ran in cwd)`.
+cwd lives on `source_files`, so the filter maps cwd → file paths → chunk ids.
+sqlite-vec applies the `rowid IN` filter *before* KNN ranking, so a scoped vector
+search returns the k nearest *within* that cwd, not the global k then filtered.
+Web search is unscoped (no cwd filter on `/api/search`).
 
 ## Two indexes, one query
 - **Vector (sqlite-vec):** embed the query string locally (ollama `nomic-embed-text`,
@@ -60,7 +73,9 @@ can't trace back to a session is a bug.
   colour-coded; honours `NO_COLOR`); piped/non-TTY output stays plain. `--format
   json` dumps the raw `SearchResult[]` (full ISO timestamps, absolute cwd) for
   machine use. `--help` must explain how to read a transcript from an id
-  (messages only by default). See `patterns/add-cli-command.md`.
+  (messages only by default). Search is scoped to the current directory by
+  default (`--all` / `--cwd PATH` to change); text mode prints the active scope
+  to stderr. See `patterns/add-cli-command.md`.
 - **Web (Vue/Vite/shadcn-vue):** list of matching sessions, each with the matching
   line. Click → load the session, scroll to the match. Shows user/assistant
   messages only by default (tool calls maybe later). Session id is in the URL and

@@ -9,7 +9,7 @@
 
 import { fileURLToPath } from 'node:url';
 import { realpathSync, existsSync, readFileSync } from 'node:fs';
-import { basename } from 'node:path';
+import { basename, resolve, join } from 'node:path';
 import { homedir } from 'node:os';
 import { readTranscript } from '../render/transcript.js';
 import type { Chunk } from '../types.js';
@@ -31,7 +31,7 @@ export const HELP_TEXT = `
 agent-search — search across Claude, Codex, and pi agent session transcripts.
 
 USAGE
-  agent-search <query> [--limit N] [--format text|json]
+  agent-search <query> [--limit N] [--format text|json] [--cwd PATH | --all]
   agent-search show <sessionId> [--tools]
   agent-search index
   agent-search watch
@@ -45,6 +45,10 @@ COMMANDS
       header (session id, agent type, file:line, role, datetime, working dir)
       with the matching snippet on the line below. Use --format json for the
       raw result objects (full ISO timestamps) instead.
+
+      By default the search is scoped to the current working directory — only
+      sessions that ran there are searched. Pass --all to search every indexed
+      session, or --cwd PATH to scope to a different directory.
 
   show <sessionId>
       Print the full transcript for a session. User and assistant messages
@@ -77,6 +81,9 @@ COMMANDS
 OPTIONS
   --limit N     Max search results to return (default: 20).
   --format F    Output format for search: text (default) or json.
+  --cwd PATH    Scope the search to sessions that ran in PATH (default: the
+                current directory). Accepts ~, relative, or absolute paths.
+  --all         Search every indexed session, ignoring the working directory.
   --tools       Include tool call chunks in transcript output (show command).
   --port N      Port for the serve command (default: ${DEFAULT_PORT}).
   --watch       Start watcher + embed worker alongside the server (serve only).
@@ -175,6 +182,19 @@ export function homeRelative(absPath: string, home: string): string {
   if (absPath === home) return '~';
   if (absPath.startsWith(home + '/')) return absPath.slice(home.length + 1);
   return absPath;
+}
+
+/**
+ * Resolve a user-supplied --cwd value to the absolute form stored in the index.
+ * Expands a leading `~`, then resolves relative paths (including `.`) against
+ * `base` (the process working directory in production). Empty input → ''.
+ */
+export function resolveCwd(input: string, base: string, home: string): string {
+  if (!input) return '';
+  let p = input;
+  if (p === '~') p = home;
+  else if (p.startsWith('~/')) p = join(home, p.slice(2));
+  return resolve(base, p);
 }
 
 /**
@@ -500,6 +520,10 @@ export interface ParsedCli {
   limit?: number;
   /** Raw --format value, validated by main() ('text' | 'json'). */
   format?: string;
+  /** Raw --cwd value (search only). '' for a bare flag; main() resolves/validates it. */
+  cwd?: string;
+  /** --all (search only): disable the default current-directory cwd filter. */
+  all?: boolean;
   showTools?: boolean;
   port?: number;
   watch?: boolean;
@@ -551,18 +575,30 @@ export function parseCli(argv: string[]): ParsedCli {
   // Strip value-taking flags (and their values) wherever they appear; the last
   // occurrence of each wins. NaN/empty values are passed through for main() to
   // reject with a friendly message.
-  const valueFlags = new Set(['--limit', '--format']);
+  const valueFlags = new Set(['--limit', '--format', '--cwd']);
+  const booleanFlags = new Set(['--all']);
   const indicesToDrop = new Set<number>();
   let limit: number | undefined;
   let format: string | undefined;
+  let cwd: string | undefined;
+  let all = false;
 
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i]!;
+
+    // Boolean flags: strip the token, no value to consume.
+    if (booleanFlags.has(flag)) {
+      indicesToDrop.add(i);
+      if (flag === '--all') all = true;
+      continue;
+    }
+
     if (!valueFlags.has(flag)) continue;
     indicesToDrop.add(i);
     const valueIdx = i + 1;
     const value = argv[valueIdx];
-    const hasValue = value !== undefined && !valueFlags.has(value);
+    const hasValue =
+      value !== undefined && !valueFlags.has(value) && !booleanFlags.has(value);
     if (hasValue) indicesToDrop.add(valueIdx);
 
     if (flag === '--limit') {
@@ -573,15 +609,18 @@ export function parseCli(argv: string[]): ParsedCli {
         !isNaN(parsed) && parsed > 0 && String(parsed) === value!.trim()
           ? parsed
           : NaN;
-    } else {
-      // --format: store the raw value (or '' for a bare flag) for main() to validate.
+    } else if (flag === '--format') {
+      // Store the raw value (or '' for a bare flag) for main() to validate.
       format = hasValue ? value! : '';
+    } else {
+      // --cwd: store the raw value (or '' for a bare flag); main() resolves it.
+      cwd = hasValue ? value! : '';
     }
   }
 
   const queryTokens = argv.filter((_, i) => !indicesToDrop.has(i));
   const query = queryTokens.join(' ');
-  return { command: 'search', query, limit, format };
+  return { command: 'search', query, limit, format, cwd, all };
 }
 
 // ---------------------------------------------------------------------------
@@ -675,6 +714,26 @@ async function main(): Promise<void> {
     }
     const format: 'text' | 'json' = parsed.format === 'json' ? 'json' : 'text';
 
+    // Working-directory filter. Default: scope to the current directory; --all
+    // disables that; --cwd PATH scopes to a different directory. cwdFilter is
+    // undefined when searching everywhere.
+    if (parsed.all && parsed.cwd !== undefined) {
+      console.error('Use either --all or --cwd, not both.');
+      process.exit(1);
+    }
+    let cwdFilter: string | undefined;
+    if (parsed.all) {
+      cwdFilter = undefined;
+    } else if (parsed.cwd !== undefined) {
+      if (parsed.cwd === '') {
+        console.error('--cwd requires a path (e.g. --cwd ~/src/foo, --cwd ., or --all)');
+        process.exit(1);
+      }
+      cwdFilter = resolveCwd(parsed.cwd, process.cwd(), homedir());
+    } else {
+      cwdFilter = process.cwd();
+    }
+
     const store = new Store();
     const embedder = new OllamaEmbedder();
 
@@ -693,9 +752,17 @@ async function main(): Promise<void> {
       // Colour only when writing to a real terminal, and honour NO_COLOR.
       const color = (process.stdout.isTTY ?? false) && !process.env.NO_COLOR;
 
+      // In text mode, note the scope on stderr (keeps stdout/JSON clean) so the
+      // default cwd filtering is discoverable.
+      if (format === 'text' && cwdFilter) {
+        const scope = homeRelative(cwdFilter, homedir());
+        const note = `Scope: ${scope} — use --all to search every directory.`;
+        console.error(color ? `${ANSI.dim}${note}${ANSI.reset}` : note);
+      }
+
       await cmdSearch(
         parsed.query,
-        { searchFn: (q, opts) => search(q, { store, embedder }, opts) },
+        { searchFn: (q, opts) => search(q, { store, embedder }, { ...opts, cwd: cwdFilter }) },
         { limit: parsed.limit, format, color, write: (s) => console.log(s) },
       );
     } catch (err) {

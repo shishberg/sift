@@ -221,6 +221,29 @@ describe('search', () => {
     expect(results.length).toBeLessThanOrEqual(3);
   });
 
+  it('scopes results to a cwd when opts.cwd is set', async () => {
+    const fileA = '/logs/a/sess-a.jsonl';
+    const fileB = '/logs/b/sess-b.jsonl';
+    const idA = store.addChunk(
+      makeChunk({ text: 'cwdscoped term here', sessionId: 'sa', filePath: fileA, lineNumber: 1 }),
+    );
+    const idB = store.addChunk(
+      makeChunk({ text: 'cwdscoped term here', sessionId: 'sb', filePath: fileB, lineNumber: 1 }),
+    );
+    store.setEmbedding(idA, makeEmbedding(0.5));
+    store.setEmbedding(idB, makeEmbedding(0.5));
+    store.setSourceFileCwd(fileA, '/home/u/proj-a', 'claude');
+    store.setSourceFileCwd(fileB, '/home/u/proj-b', 'claude');
+
+    const embedder = makeFakeEmbedder(makeEmbedding(0.5));
+
+    const all = await search('cwdscoped', { store, embedder });
+    expect(all.map((r) => r.sessionId).sort()).toEqual(['sa', 'sb']);
+
+    const scoped = await search('cwdscoped', { store, embedder }, { cwd: '/home/u/proj-a' });
+    expect(scoped.map((r) => r.sessionId)).toEqual(['sa']);
+  });
+
   it('default limit is 20', async () => {
     // Insert 25 matching chunks
     for (let i = 1; i <= 25; i++) {

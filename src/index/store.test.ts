@@ -224,6 +224,53 @@ describe('Store', () => {
     });
   });
 
+  describe('cwd-filtered search', () => {
+    // Two sessions in two different working directories. cwd lives on
+    // source_files (keyed by file path), resolved through each chunk's file_path.
+    const FILE_A = '/home/u/.claude/projects/a/sess-a.jsonl';
+    const FILE_B = '/home/u/.claude/projects/b/sess-b.jsonl';
+    const CWD_A = '/home/u/src/project-a';
+    const CWD_B = '/home/u/src/project-b';
+
+    beforeEach(() => {
+      const idA = store.addChunk(
+        makeChunk({ text: 'shared searchterm alpha', sessionId: 'sa', filePath: FILE_A, lineNumber: 1 }),
+      );
+      const idB = store.addChunk(
+        makeChunk({ text: 'shared searchterm beta', sessionId: 'sb', filePath: FILE_B, lineNumber: 1 }),
+      );
+      store.setEmbedding(idA, makeEmbedding(1.0));
+      store.setEmbedding(idB, makeEmbedding(0.0));
+      store.setSourceFileCwd(FILE_A, CWD_A, 'claude');
+      store.setSourceFileCwd(FILE_B, CWD_B, 'claude');
+    });
+
+    it('ftsSearch with a cwd returns only that directory\'s chunks', () => {
+      const all = store.ftsSearch('searchterm', 10);
+      expect(all).toHaveLength(2);
+
+      const onlyA = store.ftsSearch('searchterm', 10, CWD_A);
+      expect(onlyA).toHaveLength(1);
+      expect(store.getChunk(onlyA[0].id)!.sessionId).toBe('sa');
+    });
+
+    it('vecSearch with a cwd returns only that directory\'s chunks', () => {
+      // Query nearest emb1 (CWD_A's vector). Without a filter both come back;
+      // with CWD_B only the (farther) B chunk should remain.
+      const all = store.vecSearch(makeEmbedding(1.0), 10);
+      expect(all).toHaveLength(2);
+
+      const onlyB = store.vecSearch(makeEmbedding(1.0), 10, CWD_B);
+      expect(onlyB).toHaveLength(1);
+      expect(store.getChunk(onlyB[0].id)!.sessionId).toBe('sb');
+    });
+
+    it('an unknown cwd matches nothing', () => {
+      expect(store.ftsSearch('searchterm', 10, '/no/such/dir')).toHaveLength(0);
+      expect(store.vecSearch(makeEmbedding(1.0), 10, '/no/such/dir')).toHaveLength(0);
+    });
+  });
+
   describe('takePendingEmbeds', () => {
     it('returns chunks with needs_embed=1 with id and text', () => {
       const id = store.addChunk(makeChunk({ role: 'user', text: 'pending text' }));
