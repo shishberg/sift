@@ -48,8 +48,8 @@ surface enough identity (session id, file path) to find the original log.
 - **Web app** — Vue/Vite/shadcn-vue read-only search and session browsing.
 
 ## External Dependencies
-- **Agent session logs** (`~/.claude/projects/`, `~/.codex/sessions/`, `~/.pi/agent/sessions/`) — append-only JSONL written by the agents. READ ONLY. Source of truth. We index them, never write them.
-- **Local embedding runtime** (ollama or fastembed) — produces embeddings on-device. No network/cloud embedding service, ever.
+- *Agent session logs* (`~/.claude/projects/`, `~/.codex/sessions/`, `~/.pi/agent/sessions/`) — append-only JSONL written by the agents. READ ONLY. Source of truth. We index them, never write them.
+- *Local embedding runtime* (ollama or fastembed) — produces embeddings on-device. No network/cloud embedding service, ever.
 - **SQLite** (with sqlite-vec + FTS5) — the only datastore. Lightweight, local, single-file.
 
 ## What Does NOT Exist Here
