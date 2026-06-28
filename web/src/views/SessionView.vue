@@ -61,6 +61,13 @@ function itemKey(item: TranscriptItem): string {
   return item.filePath + ':' + item.lineNumbers.join('-');
 }
 
+// A call with no paired result shows as Pending rather than Completed.
+function toolStatus(item: TranscriptItem): 'completed' | 'pending' | 'error' {
+  if (item.tool?.isError) return 'error';
+  if (item.tool?.output === undefined) return 'pending';
+  return 'completed';
+}
+
 onMounted(() => {
   void loadSession();
 });
@@ -85,15 +92,15 @@ onUnmounted(() => {
     </div>
 
     <div v-if="!loading && !error && session" class="flex flex-col" style="gap: 16px">
-      <template v-for="item in session.items" :key="itemKey(item)">
+      <template v-for="(item, index) in session.items" :key="itemKey(item) + ':' + index">
         <!-- Tool call -->
         <div
           v-if="item.role === 'tool'"
           :data-matched="isMatch(item) ? '' : undefined"
           :class="['transcript-row', isMatch(item) ? 'chunk-matched' : '']"
         >
-          <Tool>
-            <ToolHeader :name="item.tool?.name ?? 'tool'" :is-error="item.tool?.isError" />
+          <Tool :default-open="isMatch(item)">
+            <ToolHeader :name="item.tool?.name ?? 'tool'" :status="toolStatus(item)" />
             <ToolContent>
               <ToolInput v-if="item.tool?.input" :input="item.tool.input" />
               <ToolOutput :output="item.tool?.output" :is-error="item.tool?.isError" />
