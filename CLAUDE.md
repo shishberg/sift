@@ -4,7 +4,7 @@ description: Always-loaded project anchor. Read this first. Contains project ide
 last_updated: 2026-06-28
 ---
 
-# agent-search
+# sift
 
 ## What This Is
 A local tool that indexes agent session logs (Claude, Codex, pi, opencode) into a single SQLite hybrid (vector + full-text) index and searches them from a CLI and a web app.
@@ -19,9 +19,9 @@ A local tool that indexes agent session logs (Claude, Codex, pi, opencode) into 
 ## Commands
 - Build: `npm run build` (tsc → `dist/`)
 - Test: `npm test` (vitest) · Types: `npm run typecheck`
-- Index / watch: `agent-search index` · `agent-search watch` · `agent-search status`
-- Search / read: `agent-search <query> [--limit N] [--format json]` · `agent-search show <id> [--tools]`
-- Web: `agent-search serve [--port N] [--watch]` · dev frontend `npm run web:dev`
+- Index / watch: `sift index` · `sift watch` · `sift status`
+- Search / read: `sift <query> [--limit N] [--format json]` · `sift show <id> [--tools]`
+- Web: `sift serve [--port N] [--watch]` · dev frontend `npm run web:dev`
 
 ## After Every Task
 After meaningful work, run GROW:

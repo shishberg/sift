@@ -14,7 +14,7 @@
  *
  * Incremental cursor:
  *   The SQLite `rowid` of each `part` row is stable and strictly increasing. We
- *   track the highest rowid processed in the agent-search `meta` table under the
+ *   track the highest rowid processed in the sift `meta` table under the
  *   key 'opencode_cursor'. Each run queries `WHERE rowid > cursor`, then advances
  *   the cursor atomically with the chunk inserts.
  *
@@ -65,7 +65,7 @@ interface MessageRow {
  *
  * This is NOT a JSONL adapter — it does not implement the `Adapter` interface.
  * It is a parallel "source" concept: it queries the DB directly and produces
- * `Chunk[]`, which the caller inserts into the agent-search store.
+ * `Chunk[]`, which the caller inserts into the sift store.
  *
  * Constructor accepts either:
  *   - A path string  → opens with `{ readonly: true }` (production)

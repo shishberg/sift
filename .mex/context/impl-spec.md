@@ -160,7 +160,7 @@ imported one-shot at index/watch/serve startup (cwd from `session.directory`).
 ---
 
 ## Index store (SQLite)
-- One file, default `~/.agent-search/index.db` (override via env `AGENT_SEARCH_DB`).
+- One file, default `~/.sift/index.db` (override via env `SIFT_DB`).
 - Load sqlite-vec via `sqliteVec.load(db)`.
 - Tables:
   - `chunks(id INTEGER PK, agent_type, session_id, file_path, line_number, role,
@@ -210,7 +210,7 @@ A **single-flight** in-process consumer drains them:
 No framework: arg parsing is hand-rolled in `parseCli`, help is the `HELP_TEXT`
 constant, and each command is a pure `cmd*` handler taking injected deps; `main()`
 wires them. (Both in `cli/cli.ts`.)
-- `agent-search <query> [--limit N] [--format text|json] [--cwd PATH | --all]` →
+- `sift <query> [--limit N] [--format text|json] [--cwd PATH | --all]` →
   ranked results. Text = a two-line block per result: header
   (`sessionId:line  [agent]  [role]  cwd  datetime`, cwd $HOME-relative, datetime via
   `formatTimestamp`) then the snippet on its own indented line (whitespace squashed),
@@ -219,13 +219,13 @@ wires them. (Both in `cli/cli.ts`.)
   search is scoped to one directory it's omitted (the scope note on stderr covers it).
   Header is ANSI-coloured only on a TTY (honours `NO_COLOR`). `--format json` dumps the
   raw `SearchResult[]` (full ISO timestamps, absolute cwd).
-- `agent-search show <sessionId> [--tools]` → print the transcript (user/assistant by
+- `sift show <sessionId> [--tools]` → print the transcript (user/assistant by
   default; `--tools` includes tool chunks). Role marker is ANSI-coloured on a TTY (same
   scheme as search), blank line between messages. `--help` explains result → transcript.
-- `agent-search index` → one-shot: scan all dirs + opencode, write rows, drain the
-  embed queue to completion (live progress bar), then exit. `agent-search watch` →
-  watch + keep draining. `agent-search status` → print `queueStats` + a text bar.
-- `agent-search serve [--port N] [--watch]` → start the HTTP API + web app.
+- `sift index` → one-shot: scan all dirs + opencode, write rows, drain the
+  embed queue to completion (live progress bar), then exit. `sift watch` →
+  watch + keep draining. `sift status` → print `queueStats` + a text bar.
+- `sift serve [--port N] [--watch]` → start the HTTP API + web app.
 - Progress bar: hand-rolled (carriage-return), no heavy dep, driven by `queueStats()`.
 
 ## Server + web

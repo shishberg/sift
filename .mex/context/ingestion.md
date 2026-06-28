@@ -77,5 +77,5 @@ The embedding queue IS the index: chunks are written with `needs_embed = 1`, and
 single-flight consumer (`EmbedWorker`) drains `chunks WHERE needs_embed = 1`,
 writes the sqlite-vec row, and clears the flag — atomically. Durable across
 restarts because it's just a column in SQLite; backfill is the watcher's startup
-scan re-enqueueing anything unembedded. `agent-search status` reports total /
+scan re-enqueueing anything unembedded. `sift status` reports total /
 embedded / pending.

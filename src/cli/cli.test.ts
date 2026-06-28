@@ -544,7 +544,7 @@ describe('cmdStatus', () => {
 describe('HELP_TEXT', () => {
   it('explains how to go from a search result to reading a transcript', () => {
     // The key workflow: search gives sessionId, then show reads the transcript
-    expect(HELP_TEXT).toContain('agent-search show');
+    expect(HELP_TEXT).toContain('sift show');
   });
 
   it('mentions show <sessionId> so agents know the next step after search', () => {
@@ -852,7 +852,7 @@ describe('cmdIndex', () => {
 
 describe('homeRelative', () => {
   it('strips the home prefix to give a path relative to home', () => {
-    expect(homeRelative('/Users/agent/src/agent-search', '/Users/agent')).toBe('src/agent-search');
+    expect(homeRelative('/Users/agent/src/sift', '/Users/agent')).toBe('src/sift');
   });
 
   it('returns ~ when the path is exactly home', () => {
@@ -869,7 +869,7 @@ describe('homeRelative', () => {
 });
 
 describe('resolveCwd', () => {
-  const base = '/Users/agent/src/agent-search';
+  const base = '/Users/agent/src/sift';
   const home = '/Users/agent';
 
   it('returns an absolute path unchanged', () => {

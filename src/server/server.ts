@@ -1,5 +1,5 @@
 /**
- * server.ts — minimal HTTP API server for agent-search.
+ * server.ts — minimal HTTP API server for sift.
  *
  * Uses Node's built-in `http` (no framework dep) since the API surface is tiny
  * and a thin router is all we need. Reasoning: keeps the dependency footprint at

@@ -26,17 +26,17 @@ last_updated: 2026-06-28
 
 ## First-time Setup
 1. `npm install`
-2. `npm run build` (compiles `src/` → `dist/`; the `agent-search` bin points at
+2. `npm run build` (compiles `src/` → `dist/`; the `sift` bin points at
    `dist/cli/cli.js`).
 3. Ensure ollama is running and `nomic-embed-text` is pulled.
-4. `node dist/cli/cli.js index` (or `agent-search index` if linked) — backfills
+4. `node dist/cli/cli.js index` (or `sift index` if linked) — backfills
    existing sessions and drains the embedding queue. The index DB is created at
-   `~/.agent-search/index.db` (WAL mode).
+   `~/.sift/index.db` (WAL mode).
 5. Use the CLI (`… <query>`, `… show <id>`) or run `… serve` for the web app.
    For the web frontend in dev: `npm run web:dev`.
 
 ## Environment Variables
-- `AGENT_SEARCH_DB` — path to the SQLite index file (default `~/.agent-search/index.db`).
+- `SIFT_DB` — path to the SQLite index file (default `~/.sift/index.db`).
 - `AGENT_SEARCH_DIRS` — colon-separated list of dirs to watch, overriding the
   defaults (`~/.claude/projects/`, `~/.codex/sessions/`, `~/.pi/agent/sessions/`).
   `~` is expanded. opencode is read separately from its SQLite DB.
@@ -45,10 +45,10 @@ last_updated: 2026-06-28
 Do not commit actual values.
 
 ## Common Commands
-- Index / watch: `agent-search index`, `agent-search watch`, `agent-search status`
-- Search / read: `agent-search <query> [--limit N] [--format json] [--cwd PATH | --all]`, `agent-search show <id> [--tools]`
+- Index / watch: `sift index`, `sift watch`, `sift status`
+- Search / read: `sift <query> [--limit N] [--format json] [--cwd PATH | --all]`, `sift show <id> [--tools]`
   (search defaults to the current directory's sessions; `--all` searches everywhere, `--cwd PATH` scopes elsewhere)
-- Web app: `agent-search serve [--port N] [--watch]`; dev frontend `npm run web:dev`, build `npm run web:build`
+- Web app: `sift serve [--port N] [--watch]`; dev frontend `npm run web:dev`, build `npm run web:build`
 - Tests / types: `npm test` (vitest), `npm run test:watch`, `npm run typecheck`
 
 ## Common Issues

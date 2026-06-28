@@ -122,11 +122,11 @@ export class Store {
    * Open (or create) the index database.
    *
    * @param dbPath  Explicit path, or `:memory:` for tests. Defaults to
-   *                `$AGENT_SEARCH_DB` or `~/.agent-search/index.db`.
+   *                `$SIFT_DB` or `~/.sift/index.db`.
    */
   constructor(dbPath?: string) {
     const resolved =
-      dbPath ?? process.env.AGENT_SEARCH_DB ?? join(homedir(), '.agent-search', 'index.db');
+      dbPath ?? process.env.SIFT_DB ?? join(homedir(), '.sift', 'index.db');
 
     this.dbPath = resolved;
 

@@ -13,7 +13,7 @@ const error = ref('');
 const searched = ref(false);
 
 // ── Recent search history (localStorage) ──────────────────────────────────
-const HISTORY_KEY = 'agent-search:history';
+const HISTORY_KEY = 'sift:history';
 const HISTORY_MAX = 10;
 const history = ref<string[]>(loadHistory());
 const showHistory = ref(false);
@@ -331,7 +331,7 @@ const displayList = computed(() => (searched.value ? results.value : recent.valu
         >
           Try different keywords, or run
           <code class="font-mono" style="font-size: 12px; background: var(--surface); padding: 1px 4px; border-radius: 3px">
-            agent-search index
+            sift index
           </code>
           to index your sessions first.
         </div>
@@ -344,7 +344,7 @@ const displayList = computed(() => (searched.value ? results.value : recent.valu
         >
           No sessions indexed yet. Run
           <code class="font-mono" style="font-size: 12px; background: var(--surface); padding: 1px 4px; border-radius: 3px">
-            agent-search index
+            sift index
           </code>
           to index your sessions.
         </div>

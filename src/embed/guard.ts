@@ -45,7 +45,7 @@ export function assertEmbedModel(store: Store, embedder: Embedder, dbPath: strin
       `but the current embedder is "${embedder.model}" (${embedder.dims} dims).\n` +
       `To fix: delete the index file and reindex from scratch:\n` +
       `  rm "${dbPath}"\n` +
-      `  agent-search index\n` +
+      `  sift index\n` +
       `Or set the model back to "${storedModel ?? '?'}" and restart ollama.`,
   );
 }

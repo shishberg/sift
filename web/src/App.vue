@@ -37,7 +37,7 @@ function agentBadgeClass(agentType: string | null): string {
 }
 
 // ── Resizable sidebar ──────────────────────────────────────────────────────
-const SIDEBAR_KEY = 'agent-search:sidebar-width';
+const SIDEBAR_KEY = 'sift:sidebar-width';
 const MIN_WIDTH = 260;
 const sidebarWidth = ref<number>(loadWidth());
 let dragging = false;
@@ -114,7 +114,7 @@ onUnmounted(() => {
             class="font-mono"
             style="font-size: 15px; font-weight: 500; letter-spacing: -0.01em"
           >
-            <span style="color: var(--violet)">◈</span> agent-search
+            <span style="color: var(--violet)">◈</span> sift
           </span>
         </RouterLink>
 

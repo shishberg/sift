@@ -69,7 +69,7 @@ consumer. Progress = `queueStats() {total, embedded, pending}`.
 *Date:* 2026-06-27
 *Status:* Active
 *Decision:* `queueStats()` drives a progress indicator in both interfaces.
-CLI: an `agent-search status` command + a live progress bar during index/watch.
+CLI: an `sift status` command + a live progress bar during index/watch.
 Web: `GET /api/status` returns the stats; the app polls it and renders the
 shadcn-vue `Progress` component. Covers backfill automatically (it's just the
 queue draining).

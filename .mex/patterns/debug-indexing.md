@@ -42,8 +42,8 @@ guess.
 - Trailing partial line (no newline yet) is held back by design — it indexes on the
   next write, not immediately.
 - Local embedding runtime (ollama) not running → embeddings silently stop; FTS may still work.
-- Inspect with `agent-search status` (queue totals) and by querying the index DB
-  directly (`~/.agent-search/index.db`, or `$AGENT_SEARCH_DB`). The `source_files`
+- Inspect with `sift status` (queue totals) and by querying the index DB
+  directly (`~/.sift/index.db`, or `$SIFT_DB`). The `source_files`
   table tracks `last_offset` / `inode` / line-number / `cwd` per file.
 
 ## Verify (after fixing)

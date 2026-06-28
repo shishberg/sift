@@ -386,7 +386,7 @@ describe('static file path traversal guard', () => {
 
   beforeEach(async () => {
     // Set up: web/dist/ with one file, and a sibling dir with a secret.
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-search-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sift-test-'));
     distDir = path.join(tmpDir, 'dist');
     siblingDir = path.join(tmpDir, 'dist-sibling');
     fs.mkdirSync(distDir);

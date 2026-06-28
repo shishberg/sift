@@ -4,7 +4,7 @@ description: Always-loaded project anchor. Read this first. Contains project ide
 last_updated: 2026-06-27
 ---
 
-# agent-search
+# sift
 
 ## What This Is
 A searchable index of agent session logs (Claude, Codex, pi) with local CLI and web search.
@@ -22,7 +22,7 @@ Backend/CLI (root `package.json`):
 - `node dist/cli/cli.js <query>` — search. `... show <sessionId>` — print a transcript.
   `... index` — one-shot backfill + drain embed queue. `... watch` — watch + keep indexing.
   `... status` — queue progress. `... serve [--port N] [--watch]` — HTTP API + web app.
-  (After `npm link` or via the `agent-search` bin once installed.)
+  (After `npm link` or via the `sift` bin once installed.)
 Web (`web/package.json`): `npm run web:dev` — Vite dev server. `npm run web:build` — build to `web/dist/`.
 Prereq: ollama running with `nomic-embed-text` pulled (local embeddings).
 

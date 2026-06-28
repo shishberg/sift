@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * cli.ts — agent-search CLI entrypoint.
+ * cli.ts — sift CLI entrypoint.
  *
  * All command logic lives in exported functions that take injected deps,
  * so they can be unit-tested without spawning processes or hitting ollama.
@@ -28,16 +28,16 @@ import { OpenCodeSource, DEFAULT_OPENCODE_DB_PATH } from '../sources/opencode.js
 // ---------------------------------------------------------------------------
 
 export const HELP_TEXT = `
-agent-search — search across Claude, Codex, and pi agent session transcripts.
+sift — search across Claude, Codex, and pi agent session transcripts.
 
 USAGE
-  agent-search <query> [--limit N] [--format text|json] [--cwd PATH | --all]
-  agent-search show <sessionId> [--tools]
-  agent-search index
-  agent-search watch
-  agent-search status
-  agent-search serve [--port N] [--watch]
-  agent-search --help
+  sift <query> [--limit N] [--format text|json] [--cwd PATH | --all]
+  sift show <sessionId> [--tools]
+  sift index
+  sift watch
+  sift status
+  sift serve [--port N] [--watch]
+  sift --help
 
 COMMANDS
   <query>
@@ -55,9 +55,9 @@ COMMANDS
       are shown by default; tool calls are hidden unless you pass --tools.
 
       Workflow: go from a search result to its transcript:
-        1. agent-search <query>         ← find matching chunks
+        1. sift <query>         ← find matching chunks
         2. note the session id          ← first column of each result line
-        3. agent-search show <sessionId>  ← read the full transcript
+        3. sift show <sessionId>  ← read the full transcript
 
   index
       One-shot scan: index all agent log files and drain the embedding queue
@@ -720,7 +720,7 @@ async function main(): Promise<void> {
   // ---- search ----
   if (parsed.command === 'search') {
     if (!parsed.query?.trim()) {
-      console.error('Usage: agent-search <query> [--limit N]');
+      console.error('Usage: sift <query> [--limit N]');
       process.exit(1);
     }
 
@@ -810,7 +810,7 @@ async function main(): Promise<void> {
   // ---- show ----
   if (parsed.command === 'show') {
     if (!parsed.sessionId) {
-      console.error('Usage: agent-search show <sessionId> [--tools]');
+      console.error('Usage: sift show <sessionId> [--tools]');
       process.exit(1);
     }
 
@@ -963,7 +963,7 @@ async function main(): Promise<void> {
       { port: parsed.port },
     );
 
-    console.log(`agent-search server running at ${url}`);
+    console.log(`sift server running at ${url}`);
     if (parsed.watch) {
       console.log('Watching agent log directories. Ctrl-C to stop.');
     }
