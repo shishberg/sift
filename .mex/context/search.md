@@ -56,9 +56,11 @@ can't trace back to a session is a bug.
   a two-line block per result: a header (session id, agent, file:line, role, cwd
   home-relative, datetime via `formatTimestamp` — same format as the web UI) then
   the snippet on its own indented line, whitespace/newlines squashed, blank line
-  between results. `--format json` dumps the raw `SearchResult[]` (full ISO
-  timestamps, absolute cwd) for machine use. `--help` must explain how to read a
-  transcript from an id (messages only by default). See `patterns/add-cli-command.md`.
+  between results. The header is ANSI-coloured when stdout is a TTY (agent
+  colour-coded; honours `NO_COLOR`); piped/non-TTY output stays plain. `--format
+  json` dumps the raw `SearchResult[]` (full ISO timestamps, absolute cwd) for
+  machine use. `--help` must explain how to read a transcript from an id
+  (messages only by default). See `patterns/add-cli-command.md`.
 - **Web (Vue/Vite/shadcn-vue):** list of matching sessions, each with the matching
   line. Click → load the session, scroll to the match. Shows user/assistant
   messages only by default (tool calls maybe later). Session id is in the URL and

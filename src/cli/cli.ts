@@ -125,6 +125,42 @@ export function renderProgressBar(
 /** Max snippet chars to display. Beyond this we truncate with …  */
 const SNIPPET_DISPLAY_MAX = 120;
 
+// ---------------------------------------------------------------------------
+// ANSI colour (header only; opt-in so non-TTY / piped output stays plain)
+// ---------------------------------------------------------------------------
+
+const ANSI = {
+  reset: '\x1b[0m',
+  bold: '\x1b[1m',
+  dim: '\x1b[2m',
+  red: '\x1b[31m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  blue: '\x1b[34m',
+  magenta: '\x1b[35m',
+  cyan: '\x1b[36m',
+} as const;
+
+/** Distinct colour per agent so the source is scannable at a glance. */
+function agentColor(agent: string): string {
+  switch (agent) {
+    case 'claude': return ANSI.magenta;
+    case 'codex': return ANSI.green;
+    case 'pi': return ANSI.blue;
+    case 'opencode': return ANSI.yellow;
+    default: return ANSI.cyan;
+  }
+}
+
+/** Colour the role marker: user/assistant/tool. */
+function roleColor(role: string): string {
+  switch (role) {
+    case 'user': return ANSI.yellow;
+    case 'assistant': return ANSI.green;
+    default: return ANSI.dim; // tool
+  }
+}
+
 /**
  * Format one search result as a single readable line.
  * Always includes: session id, agent type, file:line, role, snippet.
@@ -172,17 +208,30 @@ export function formatTimestamp(iso: string, now: Date = new Date()): string {
  *
  *   test-session-id  [claude] session.jsonl:10  [user]  src/y  28 Jun 13:25
  *     the snippet text, newlines squashed
+ *
+ * @param opts.color  Wrap header fields in ANSI colour (default off, so piped
+ *                    / non-TTY output stays plain). The snippet body is never
+ *                    coloured.
  */
-export function formatResult(r: SearchResult): string {
+export function formatResult(r: SearchResult, opts: { color?: boolean } = {}): string {
+  const color = opts.color ?? false;
+  const paint = (s: string, code: string): string =>
+    color ? `${code}${s}${ANSI.reset}` : s;
+
   const file = basename(r.filePath);
   const loc = `${file}:${r.lineNumber}`;
 
-  const headerParts = [r.sessionId, `[${r.agentType}]`, loc, `[${r.role}]`];
+  const headerParts = [
+    paint(r.sessionId, ANSI.dim),
+    paint(`[${r.agentType}]`, ANSI.bold + agentColor(r.agentType)),
+    paint(loc, ANSI.cyan),
+    paint(`[${r.role}]`, roleColor(r.role)),
+  ];
   // Working dir then datetime last, matching the web UI ordering.
   const cwd = homeRelative(r.cwd, homedir());
-  if (cwd) headerParts.push(cwd);
+  if (cwd) headerParts.push(paint(cwd, ANSI.dim));
   const when = formatTimestamp(r.timestamp);
-  if (when) headerParts.push(when);
+  if (when) headerParts.push(paint(when, ANSI.dim));
   const header = headerParts.join('  ');
 
   const squashed = r.snippet.replace(/\s+/g, ' ').trim();
@@ -206,6 +255,7 @@ export function formatResult(r: SearchResult): string {
  * @param opts.limit     Max results (forwarded to searchFn).
  * @param opts.format    'json' dumps the raw results array (full timestamps);
  *                       'text' (default) prints the readable two-line blocks.
+ * @param opts.color     Colour the text-mode header (default off).
  * @param opts.write     Output writer (console.log in prod, captured array in tests).
  */
 export async function cmdSearch(
@@ -213,7 +263,7 @@ export async function cmdSearch(
   deps: {
     searchFn: (q: string, opts?: { limit?: number }) => Promise<SearchResult[]>;
   },
-  opts: { limit?: number; format?: 'text' | 'json'; write: (s: string) => void },
+  opts: { limit?: number; format?: 'text' | 'json'; color?: boolean; write: (s: string) => void },
 ): Promise<void> {
   const results = await deps.searchFn(query, { limit: opts.limit });
 
@@ -230,7 +280,7 @@ export async function cmdSearch(
   // A blank line between results keeps them visually separated.
   results.forEach((r, i) => {
     if (i > 0) opts.write('');
-    opts.write(formatResult(r));
+    opts.write(formatResult(r, { color: opts.color }));
   });
 }
 
@@ -640,10 +690,13 @@ async function main(): Promise<void> {
     }
 
     try {
+      // Colour only when writing to a real terminal, and honour NO_COLOR.
+      const color = (process.stdout.isTTY ?? false) && !process.env.NO_COLOR;
+
       await cmdSearch(
         parsed.query,
         { searchFn: (q, opts) => search(q, { store, embedder }, opts) },
-        { limit: parsed.limit, format, write: (s) => console.log(s) },
+        { limit: parsed.limit, format, color, write: (s) => console.log(s) },
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

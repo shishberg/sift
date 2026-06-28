@@ -140,6 +140,22 @@ describe('formatResult', () => {
     expect(snippetPortion).not.toMatch(/a\s*\n\s*b/);
   });
 
+  it('emits no ANSI escape codes by default', () => {
+    const line = formatResult(makeSearchResult());
+    expect(line).not.toContain('\x1b[');
+  });
+
+  it('colours the header when color is enabled, leaving the text readable', () => {
+    const line = formatResult(makeSearchResult({ sessionId: 'sess-color' }), {
+      color: true,
+    });
+    expect(line).toContain('\x1b['); // some ANSI colour present
+    expect(line).toContain('sess-color'); // raw text still recoverable
+    // The snippet body itself stays uncoloured (no escape on the body line).
+    const body = line.split('\n').slice(1).join('\n');
+    expect(body).not.toContain('\x1b[');
+  });
+
   it('shows the working directory home-relative in the header', () => {
     const line = formatResult(
       makeSearchResult({ cwd: `${homedir()}/src/proj` }),
