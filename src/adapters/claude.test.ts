@@ -187,6 +187,37 @@ describe('ClaudeAdapter', () => {
     });
   });
 
+  describe('parseLine() — harness command tags', () => {
+    it('squashes a slash-command wrapper block into readable text', () => {
+      const line = JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content:
+            '<command-name>/login</command-name>\n  <command-message>login</command-message>\n  <command-args></command-args>',
+        },
+        timestamp: '2026-06-27T08:00:00.000Z',
+        sessionId: SESSION_ID,
+      });
+      const chunks = adapter.parseLine(line, CTX);
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0].text).toBe('/login login');
+    });
+
+    it('drops a caveat-only message so it is not indexed', () => {
+      const line = JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: '<local-command-caveat>Caveat: boilerplate.</local-command-caveat>',
+        },
+        timestamp: '2026-06-27T08:00:00.000Z',
+        sessionId: SESSION_ID,
+      });
+      expect(adapter.parseLine(line, CTX)).toHaveLength(0);
+    });
+  });
+
   describe('parseLine() — user tool_result', () => {
     it('produces one chunk with role tool and truncated text', () => {
       const chunks = adapter.parseLine(USER_TOOL_RESULT_LINE, CTX);

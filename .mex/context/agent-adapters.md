@@ -60,6 +60,20 @@ Adapters are registered so the watcher can pick the right one per directory/file
 [TO BE DETERMINED — define the registry/interface signature after first
 implementation, then record it here so new adapters follow it.]
 
+## Harness wrapper tags (claude)
+Claude Code injects XML wrapper tags into the *user* turn to annotate harness
+activity: slash-command invocations (`<command-name>`, `<command-message>`,
+`<command-args>`) and local `!`-command output (`<local-command-stdout>`,
+`<local-command-stderr>`, `<local-command-caveat>`). `src/harness-tags.ts` holds
+a CLOSED registry (`HARNESS_TAGS`) mapping each tag to `unwrap` (drop tags, keep
+inner text) or `drop` (remove element + content; the caveat is pure boilerplate).
+`stripHarnessTags(text)` is a no-op unless a registry tag is present, so real
+code/XML in messages is never touched. Applied to user text in BOTH the claude
+adapter (`src/adapters/claude.ts`, indexed text) and the faithful renderer
+(`src/render/claude.ts`, transcript view). Render is fixed immediately (reads raw
+logs); search snippets only update for chunks indexed after this — re-index to
+clean existing rows. Add new harness tags to the registry; nothing else changes.
+
 ## Out of scope
 - opencode (own SQLite DB, not JSONL) — not V1.
 - Hooks-based ingestion — kept open as a future per-agent capability, but adapters

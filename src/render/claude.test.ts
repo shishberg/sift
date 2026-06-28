@@ -24,6 +24,37 @@ describe('parseClaudeTranscript', () => {
     expect(items[0].lineNumbers).toEqual([1]);
   });
 
+  it('squashes harness command wrapper tags in user messages', () => {
+    const items = parseClaudeTranscript(
+      lines({
+        type: 'user',
+        timestamp: 't1',
+        message: {
+          role: 'user',
+          content:
+            '<command-name>/login</command-name>\n  <command-message>login</command-message>\n  <command-args></command-args>',
+        },
+      }),
+      FP,
+    );
+    expect(items.map((i) => i.text)).toEqual(['/login login']);
+  });
+
+  it('drops a caveat-only user message entirely', () => {
+    const items = parseClaudeTranscript(
+      lines({
+        type: 'user',
+        timestamp: 't1',
+        message: {
+          role: 'user',
+          content: '<local-command-caveat>Caveat: boilerplate.</local-command-caveat>',
+        },
+      }),
+      FP,
+    );
+    expect(items).toEqual([]);
+  });
+
   it('pairs tool_use with its later tool_result, covering both line numbers', () => {
     const items = parseClaudeTranscript(
       lines(

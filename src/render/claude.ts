@@ -1,5 +1,6 @@
 import type { TranscriptItem } from '../types.js';
 import { resultText } from './shared.js';
+import { stripHarnessTags } from '../harness-tags.js';
 
 /**
  * Parse a full claude JSONL transcript faithfully: untruncated text, tool_use
@@ -31,7 +32,8 @@ export function parseClaudeTranscript(lines: string[], filePath: string): Transc
     const content = message.content;
 
     if (typeof content === 'string') {
-      if (content) items.push({ role, text: content, filePath, lineNumbers: [lineNumber], timestamp });
+      const text = role === 'user' ? stripHarnessTags(content) : content;
+      if (text) items.push({ role, text, filePath, lineNumbers: [lineNumber], timestamp });
       return;
     }
     if (!Array.isArray(content)) return;
@@ -40,7 +42,8 @@ export function parseClaudeTranscript(lines: string[], filePath: string): Transc
       const blockType = block['type'] as string | undefined;
 
       if (blockType === 'text') {
-        const text = (block['text'] as string | undefined) ?? '';
+        const raw = (block['text'] as string | undefined) ?? '';
+        const text = role === 'user' ? stripHarnessTags(raw) : raw;
         if (text) items.push({ role, text, filePath, lineNumbers: [lineNumber], timestamp });
       } else if (blockType === 'thinking') {
         continue;

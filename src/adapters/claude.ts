@@ -3,6 +3,7 @@ import path from 'path';
 import type { Chunk } from '../types.js';
 import type { Adapter, ParseCtx } from './types.js';
 import { truncate, TOOL_ARGS_MAX, TOOL_RESULT_MAX } from '../text.js';
+import { stripHarnessTags } from '../harness-tags.js';
 
 /** Extract session id from file path: the stem of the filename (without .jsonl). */
 function sessionIdFromPath(filePath: string): string {
@@ -67,7 +68,9 @@ export class ClaudeAdapter implements Adapter {
 
     // String content → single text chunk.
     if (typeof content === 'string') {
-      return [{ agentType, sessionId, filePath, lineNumber, role, text: content, timestamp }];
+      const text = role === 'user' ? stripHarnessTags(content) : content;
+      if (!text) return [];
+      return [{ agentType, sessionId, filePath, lineNumber, role, text, timestamp }];
     }
 
     if (!Array.isArray(content)) return [];
@@ -77,7 +80,8 @@ export class ClaudeAdapter implements Adapter {
       const blockType = block['type'] as string;
 
       if (blockType === 'text') {
-        const text = (block['text'] as string | undefined) ?? '';
+        const raw = (block['text'] as string | undefined) ?? '';
+        const text = role === 'user' ? stripHarnessTags(raw) : raw;
         if (text) {
           chunks.push({ agentType, sessionId, filePath, lineNumber, role, text, timestamp });
         }
