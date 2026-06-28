@@ -79,6 +79,7 @@ export class Store {
   private readonly stmtVecSearch: Database.Statement;
   private readonly stmtGetChunk: Database.Statement;
   private readonly stmtGetSessionChunks: Database.Statement;
+  private readonly stmtGetSessionFiles: Database.Statement;
 
   // Cached transactions.
   private readonly txnBatch: (items: Array<{ chunk: Chunk }>) => number[];
@@ -211,6 +212,13 @@ export class Store {
       SELECT * FROM chunks
       WHERE  session_id = ?
       ORDER  BY file_path, line_number
+    `);
+
+    this.stmtGetSessionFiles = this.db.prepare(`
+      SELECT DISTINCT file_path AS filePath, agent_type AS agentType
+      FROM   chunks
+      WHERE  session_id = ?
+      ORDER  BY file_path
     `);
 
     // ---- transactions ----
@@ -497,6 +505,12 @@ export class Store {
   getSessionChunks(sessionId: string): Chunk[] {
     const rows = this.stmtGetSessionChunks.all(sessionId) as ChunkRow[];
     return rows.map(rowToChunk);
+  }
+
+  /** Distinct (file_path, agent_type) for a session, ordered by file_path. */
+  getSessionFiles(sessionId: string): { filePath: string; agentType: string }[] {
+    const rows = this.stmtGetSessionFiles.all(sessionId) as { filePath: string; agentType: string }[];
+    return rows;
   }
 
   // ------------------------------------------------------------------ embed guard

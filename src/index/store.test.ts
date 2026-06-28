@@ -463,6 +463,20 @@ describe('Store', () => {
     });
   });
 
+  describe('getSessionFiles', () => {
+    it('getSessionFiles returns distinct file/agent for a session, ordered', () => {
+      store.addChunks([
+        { chunk: { agentType: 'claude', sessionId: 's1', filePath: '/b.jsonl', lineNumber: 1, role: 'user', text: 'a', timestamp: 't' } },
+        { chunk: { agentType: 'claude', sessionId: 's1', filePath: '/b.jsonl', lineNumber: 2, role: 'assistant', text: 'b', timestamp: 't' } },
+        { chunk: { agentType: 'claude', sessionId: 's1', filePath: '/a.jsonl', lineNumber: 1, role: 'user', text: 'c', timestamp: 't' } },
+      ]);
+      expect(store.getSessionFiles('s1')).toEqual([
+        { filePath: '/a.jsonl', agentType: 'claude' },
+        { filePath: '/b.jsonl', agentType: 'claude' },
+      ]);
+    });
+  });
+
   describe('checkEmbedModel', () => {
     it('returns matches=true and no stored when no meta is set (first run)', () => {
       const result = store.checkEmbedModel('nomic-embed-text', 768);
