@@ -434,5 +434,18 @@ describe('OpenCodeSource', () => {
       expect(items[1]!.tool).toEqual({ name: 'bash', input: '{"cmd":"ls"}', output: 'a\nb', isError: false });
       expect(items[1]!.lineNumbers).toEqual([2]);
     });
+
+    it('uses state.error as the output for a failed tool part', () => {
+      insertMessage(fixtureDb, { id: 'm1', sessionId: 's1', role: 'assistant' });
+      insertPart(fixtureDb, {
+        id: 'prt_err',
+        messageId: 'm1',
+        sessionId: 's1',
+        data: { type: 'tool', tool: 'read', state: { status: 'error', input: { filePath: '/missing' }, error: 'File not found' } },
+      });
+      const source = new OpenCodeSource(fixtureDb);
+      const items = source.readTranscript('s1');
+      expect(items[0]!.tool).toMatchObject({ name: 'read', output: 'File not found', isError: true });
+    });
   });
 });

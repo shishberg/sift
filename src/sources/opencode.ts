@@ -342,11 +342,20 @@ export class OpenCodeSource {
       } else if (type === 'tool') {
         const name = typeof parsed['tool'] === 'string' ? (parsed['tool'] as string) : '';
         if (!name) continue;
-        const state = parsed['state'] as { input?: unknown; output?: unknown; status?: unknown } | undefined;
+        const state = parsed['state'] as
+          | { input?: unknown; output?: unknown; status?: unknown; error?: unknown }
+          | undefined;
         const input = state?.input !== undefined ? JSON.stringify(state.input) : '';
-        const output =
-          typeof state?.output === 'string' ? state.output : state?.output !== undefined ? JSON.stringify(state.output) : undefined;
         const isError = state?.status === 'error';
+        // Error parts carry the message in state.error, not state.output.
+        const outputValue =
+          state?.output !== undefined ? state.output : isError ? state?.error : undefined;
+        const output =
+          typeof outputValue === 'string'
+            ? outputValue
+            : outputValue !== undefined
+              ? JSON.stringify(outputValue)
+              : undefined;
         items.push({ role: 'tool', text: '', tool: { name, input, output, isError }, filePath, lineNumbers: [part.rowid], timestamp });
       }
     }
