@@ -13,7 +13,7 @@ edges:
     condition: to understand the watch → tail → parse → queue flow being debugged
   - target: context/agent-adapters.md
     condition: when the failure is in parsing a specific agent's format
-last_updated: 2026-06-27
+last_updated: 2026-06-28
 ---
 
 # Debug Indexing
@@ -41,9 +41,10 @@ guess.
 ## Gotchas
 - Trailing partial line (no newline yet) is held back by design — it indexes on the
   next write, not immediately.
-- Local embedding runtime not running → embeddings silently stop; FTS may still work.
-- [VERIFY AFTER FIRST IMPLEMENTATION — add the real log/inspection commands and the
-  exact `source_files` columns once they exist.]
+- Local embedding runtime (ollama) not running → embeddings silently stop; FTS may still work.
+- Inspect with `agent-search status` (queue totals) and by querying the index DB
+  directly (`~/.agent-search/index.db`, or `$AGENT_SEARCH_DB`). The `source_files`
+  table tracks `last_offset` / `inode` / line-number / `cwd` per file.
 
 ## Verify (after fixing)
 - [ ] The session now appears in search (vector and/or FTS as expected).

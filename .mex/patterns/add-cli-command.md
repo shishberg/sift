@@ -12,7 +12,7 @@ edges:
     condition: when the command searches or reads sessions
   - target: context/conventions.md
     condition: to check the read-only and result-locator rules
-last_updated: 2026-06-27
+last_updated: 2026-06-28
 ---
 
 # Add a CLI Command
@@ -23,26 +23,45 @@ The CLI is the agent-facing interface. Agents discover what it can do from
 for query/result behaviour. The CLI is read-only — it searches and reads
 transcripts, it never modifies sessions.
 
+No CLI framework: arg parsing is hand-rolled in `parseCli` and help is the
+`HELP_TEXT` constant, both in `src/cli/cli.ts`. Each command's logic lives in an
+exported pure function (`cmdSearch`, `cmdShow`, …) that takes injected deps, so it
+unit-tests without spawning processes or hitting ollama; `main()` is the thin
+wiring layer. Follow that shape for new commands.
+
 ## Steps
-1. Define the command and its flags. Keep queries as a plain string argument — no
-   query syntax (see `context/decisions.md`).
-2. Write clear `--help`: what it does, args, and crucially how an agent uses the
-   output (e.g. take a session id from a search result, then read its transcript,
-   messages-only by default).
+1. Add the command/flags to `parseCli` (return a field on `ParsedCli`) and a pure
+   `cmdX` handler; wire it in `main()`. Keep queries as a plain string argument —
+   no query syntax (see `context/decisions.md`).
+2. Write clear `--help` in `HELP_TEXT`: what it does, args, and crucially how an
+   agent uses the output (e.g. take a session id from a search result, then read
+   its transcript, messages-only by default).
 3. Print results so each carries its session id (+ file path / line number).
-4. Make sure output is easy for an agent to parse. [VERIFY AFTER FIRST IMPLEMENTATION — decide plain text vs `--json` and record it.]
+4. Output format (decided): human-readable text by default; offer `--format json`
+   for machine use where it helps (search has both). Validate bad flag values in
+   `main()` and exit non-zero with a friendly message.
+
+## Output conventions (search, `formatResult`)
+- Text result = a two-line block: a header (`sessionId  [agent]  file:line
+  [role]  cwd  datetime`, cwd home-relative, datetime via `formatTimestamp`) then
+  the snippet on its own indented line, whitespace squashed, blank line between.
+- Header is ANSI-coloured only when `process.stdout.isTTY` and `NO_COLOR` is
+  unset; piped / `--format json` output stays plain.
+- `--format json` dumps the raw objects (full ISO timestamps, absolute cwd).
 
 ## Gotchas
 - Every result must include the session id — that's how an agent gets back to the log.
 - Don't add a write/resume command — read-only only.
-- Keep `--help` in sync when flags change.
-- [VERIFY AFTER FIRST IMPLEMENTATION — confirm the CLI framework and help conventions once chosen.]
+- Keep `--help` (`HELP_TEXT`) in sync when flags change.
+- Strip flags out of the joined query string so they don't leak into the search
+  (see the value-flag loop in `parseCli`).
 
 ## Verify
 - [ ] `--help` is accurate and explains how to go from a result to a transcript.
 - [ ] Results carry session id (+ file path / line number).
 - [ ] Command is read-only — no writes to session logs.
 - [ ] Plain string query; no query syntax added.
+- [ ] New flags are stripped from the query and bad values rejected in `main()`.
 
 ## Debug
 - No/odd results → check the search path (`context/search.md`) and whether the

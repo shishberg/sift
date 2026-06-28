@@ -19,7 +19,7 @@ edges:
     condition: when deciding what gets written to the vector vs FTS index
   - target: patterns/debug-indexing.md
     condition: when a session isn't being indexed correctly
-last_updated: 2026-06-27
+last_updated: 2026-06-28
 ---
 
 # Ingestion
@@ -30,7 +30,10 @@ last_updated: 2026-06-27
 - `~/.pi/agent/sessions/`
 
 These hold append-only JSONL — one JSON object per line. They are READ ONLY.
-opencode is excluded in V1 (its own SQLite DB, not JSONL).
+The watched dirs are derived from the adapters' `rootDir`s (override with
+`AGENT_SEARCH_DIRS`). opencode is also indexed, but NOT via the watcher — it's a
+SQLite DB read by `OpenCodeSource` as a one-shot import at startup (see
+`context/agent-adapters.md`).
 
 ## Trigger
 A chokidar watcher over the directories above. On startup it also scans existing
@@ -39,8 +42,9 @@ way. No agent hooks in V1 (see `context/decisions.md`).
 
 ## Change detection — byte-offset tail
 Re-reading whole files on every write is wasteful. Track per-file state in a
-`source_files` table:
-- `path`, `inode`, `last_offset`, `last_size` (and agent type).
+`source_files` table (snake_case columns):
+- `path`, `agent_type`, `inode`, `last_offset`, `last_size`, `last_line_number`,
+  `cwd`.
 
 On a change event:
 1. `fstat` the file.
@@ -61,12 +65,17 @@ entirely behind the adapter. See `context/agent-adapters.md`.
 - **Skip embedding tool calls** — noisy, inflates the vector table, low semantic value.
 - Every chunk stores: session id, source file path, line number, role, timestamp.
 
-[TO BE DETERMINED — populate after first implementation:]
-- Exact chunking strategy (one message = one chunk? split long messages?).
-- The precise compact tool-call representation for FTS.
-- Whether/which tool results are worth indexing, and how to truncate them.
-- Embedding batch size and backpressure for the queue.
+Chunking & truncation (see `src/text.ts`):
+- One message / text block = one chunk; no further splitting.
+- Tool calls: a `tool` chunk with text `name(args)`, args truncated to
+  `TOOL_ARGS_MAX` (200) — FTS-only, not embedded.
+- Tool results: a `tool` chunk, text truncated to `TOOL_RESULT_MAX` (500) —
+  FTS-only.
 
 ## Queue
-New parsed chunks are queued for embedding (user/assistant) and written to FTS.
-[TO BE DETERMINED — queue durability, ordering, and crash recovery after first implementation.]
+The embedding queue IS the index: chunks are written with `needs_embed = 1`, and a
+single-flight consumer (`EmbedWorker`) drains `chunks WHERE needs_embed = 1`,
+writes the sqlite-vec row, and clears the flag — atomically. Durable across
+restarts because it's just a column in SQLite; backfill is the watcher's startup
+scan re-enqueueing anything unembedded. `agent-search status` reports total /
+embedded / pending.

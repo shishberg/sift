@@ -13,20 +13,24 @@ edges:
     condition: when a convention depends on understanding the system structure
   - target: context/agent-adapters.md
     condition: when writing per-agent code — it must stay behind the adapter interface
-last_updated: 2026-06-27
+last_updated: 2026-06-28
 ---
 
 # Conventions
 
 ## Naming
-[TO BE DETERMINED — set file/function/variable casing after first implementation. Decide once and record here.]
-- Database columns: [TO BE DETERMINED] — pick snake_case or camelCase and keep it consistent across the schema.
-- Agent type identifiers: stable lowercase strings (`claude`, `codex`, `pi`) used as keys in the adapter registry.
+- TypeScript: `camelCase` for variables/functions, `PascalCase` for types/classes.
+- Database columns: `snake_case` (e.g. `source_files`, `last_offset`, `needs_embed`).
+- Agent type identifiers: stable lowercase strings (`claude`, `codex`, `pi`,
+  `opencode`) used as keys in the adapter registry / agent_type column.
 
 ## Structure
 - Agent-specific knowledge (on-disk format, JSON schema, paths) lives ONLY inside that agent's adapter. Indexing, search, CLI, and web never branch on agent type — they go through the adapter interface. See `context/agent-adapters.md`.
-- Indexing, search, CLI, and web are separate concerns. [TO BE DETERMINED — fix the exact directory layout after first implementation]
-- [TO BE DETERMINED — decide where tests live relative to source]
+- Concerns are separate top-level dirs under `src/`: `adapters/`, `sources/`
+  (non-JSONL, e.g. opencode), `ingest/` (watcher + indexer), `index/` (store),
+  `embed/`, `search/`, `render/` (faithful transcript), `cli/`, `server/`. The
+  web app is a separate Vite project under `web/`.
+- Tests are colocated: `foo.ts` ↔ `foo.test.ts` in the same directory (vitest).
 
 ## Patterns
 **Everything goes through the agent adapter interface.** No part of the system
@@ -52,4 +56,4 @@ Before presenting any code:
 - [ ] Search results carry session id (+ file path / line number where applicable).
 - [ ] No cloud embedding call introduced — embeddings stay local.
 - [ ] CLI changes keep `--help` accurate and discoverable.
-- [ ] [TO BE DETERMINED — add lint/typecheck/test commands once they exist]
+- [ ] `npm test` (vitest) and `npm run typecheck` (tsc --noEmit) pass. (No linter configured.)

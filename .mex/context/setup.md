@@ -13,40 +13,48 @@ edges:
     condition: when specific technology versions or library details are needed
   - target: context/ingestion.md
     condition: when configuring which session directories get watched
-last_updated: 2026-06-27
+last_updated: 2026-06-28
 ---
 
 # Setup
 
-> New project — nothing is built yet. Most of this is [TO BE DETERMINED] and
-> should be filled in after the first implementation lands.
-
 ## Prerequisites
-- Node.js [TO BE DETERMINED — pin version]
-- **ollama** installed and running, with the model pulled: `ollama pull nomic-embed-text`
-- No system SQLite needed — better-sqlite3 bundles SQLite (with FTS5); the `sqlite-vec` npm package provides the extension binary loaded at runtime. [TO BE DETERMINED — confirm a prebuilt sqlite-vec binary exists for macOS arm64]
+- Node.js >= 20 (see `package.json` engines).
+- *ollama* installed and running, with the model pulled: `ollama pull nomic-embed-text`.
+- No system SQLite needed — better-sqlite3 bundles SQLite (with FTS5); the
+  `sqlite-vec` npm package provides the extension binary, loaded at runtime.
 
 ## First-time Setup
-[TO BE DETERMINED — populate after first implementation. Expected shape:]
-1. Install dependencies (`npm install` or chosen package manager)
-2. Ensure ollama is running and `nomic-embed-text` is pulled
-3. Initialise the SQLite index (schema + sqlite-vec + FTS5)
-4. Run the indexer to backfill existing sessions
-5. Start the web app / use the CLI
+1. `npm install`
+2. `npm run build` (compiles `src/` → `dist/`; the `agent-search` bin points at
+   `dist/cli/cli.js`).
+3. Ensure ollama is running and `nomic-embed-text` is pulled.
+4. `node dist/cli/cli.js index` (or `agent-search index` if linked) — backfills
+   existing sessions and drains the embedding queue. The index DB is created at
+   `~/.agent-search/index.db` (WAL mode).
+5. Use the CLI (`… <query>`, `… show <id>`) or run `… serve` for the web app.
+   For the web frontend in dev: `npm run web:dev`.
 
 ## Environment Variables
-[TO BE DETERMINED — populate as variables are introduced. Likely candidates:]
-- Session directory overrides (defaults: `~/.claude/projects/`, `~/.codex/sessions/`, `~/.pi/agent/sessions/`)
-- Embedding model / runtime selection
-- Path to the SQLite index file
+- `AGENT_SEARCH_DB` — path to the SQLite index file (default `~/.agent-search/index.db`).
+- `AGENT_SEARCH_DIRS` — colon-separated list of dirs to watch, overriding the
+  defaults (`~/.claude/projects/`, `~/.codex/sessions/`, `~/.pi/agent/sessions/`).
+  `~` is expanded. opencode is read separately from its SQLite DB.
+- `AGENT_SEARCH_PORT` — port for `serve` (default 3737; `--port` also works).
+- `NO_COLOR` — disables ANSI colour in CLI search output.
 Do not commit actual values.
 
 ## Common Commands
-[TO BE DETERMINED — fill from package.json once it exists. Expected:]
-- Run the indexer/watcher
-- Run the web app (Vite dev server)
-- Run the CLI
-- Run tests / typecheck / lint
+- Index / watch: `agent-search index`, `agent-search watch`, `agent-search status`
+- Search / read: `agent-search <query> [--limit N] [--format json]`, `agent-search show <id> [--tools]`
+- Web app: `agent-search serve [--port N] [--watch]`; dev frontend `npm run web:dev`, build `npm run web:build`
+- Tests / types: `npm test` (vitest), `npm run test:watch`, `npm run typecheck`
 
 ## Common Issues
-[TO BE DETERMINED — record real issues as they occur, e.g. sqlite-vec extension fails to load, embedding runtime not running, a session format the adapter doesn't recognise.]
+- **ollama not running** → embeddings stop (clear error: "Is ollama running?
+  Start it with: ollama serve"). FTS5 search still works on already-indexed text.
+- **Embed model mismatch** → search/index abort with a guard error if the index
+  was built with a different model than the current embedder.
+- **A session shows raw harness tags in old search snippets** → re-index; the
+  renderer strips them live but indexed chunks only update on re-index.
+- For "session not indexed / not in search", follow `patterns/debug-indexing.md`.
