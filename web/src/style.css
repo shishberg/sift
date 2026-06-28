@@ -102,31 +102,6 @@ body {
   font-size: 11px;
 }
 
-/* ── Role rule (transcript divider) ────────────────────────────────────── */
-.role-rule {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 6px;
-}
-
-.role-label {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  color: var(--muted-fg);
-  white-space: nowrap;
-  text-transform: uppercase;
-  flex-shrink: 0;
-}
-
-.rule-line {
-  flex: 1;
-  height: 1px;
-  background: var(--border);
-}
-
 /* ── Copy button (icon) ─────────────────────────────────────────────────── */
 .copy-btn {
   display: inline-flex;
@@ -197,26 +172,106 @@ body {
   color: var(--fg);
 }
 
-/* ── Message boxes (user / assistant) ──────────────────────────────────── */
-.msg {
-  border: 1px solid var(--border);
+/* ── Transcript rows ───────────────────────────────────────────────────── */
+.transcript-row {
+  position: relative;
+}
+.line-label {
+  display: block;
+  margin-top: 2px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--border);
+  letter-spacing: 0.02em;
+}
+.line-label-right {
+  text-align: right;
+}
+
+/* ── Message bubbles (ai-elements Message + our colours) ───────────────── */
+.bubble {
   border-radius: 8px;
   padding: 12px 16px;
+  border: 1px solid var(--border);
   background: var(--white);
 }
-.msg-user {
+.is-user .bubble {
   background: var(--user-bg);
   border-color: var(--user-border);
-}
-.msg-assistant {
-  background: var(--assistant-bg);
-  border-color: var(--assistant-border);
-}
-.msg-user .role-label {
   color: var(--user-text);
 }
-.msg-assistant .role-label {
+.is-assistant .bubble {
+  background: var(--assistant-bg);
+  border-color: var(--assistant-border);
   color: var(--assistant-text);
+}
+
+/* ── Tool block (ai-elements Tool) ─────────────────────────────────────── */
+.tool-block {
+  border-color: var(--border);
+  background: var(--white);
+}
+.tool-header {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+}
+.tool-header:hover {
+  background: var(--surface);
+}
+.tool-name {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+.tool-status {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted-fg);
+}
+.tool-status-error {
+  background: #fef2f2;
+  color: #991b1b;
+}
+.tool-chevron {
+  transition: transform 0.15s;
+}
+.tool-block[data-state="open"] .tool-chevron {
+  transform: rotate(180deg);
+}
+.tool-section {
+  padding: 0 12px 12px;
+}
+.tool-section-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-fg);
+  margin: 8px 0 4px;
+}
+.tool-pre {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-fg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+.tool-pre-error {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #991b1b;
 }
 
 /* ── Rendered markdown body ─────────────────────────────────────────────── */
