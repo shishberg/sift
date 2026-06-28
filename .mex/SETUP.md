@@ -1,8 +1,8 @@
 # Setup — Populate This Scaffold
 
-This file contains the prompts to populate the scaffold. It is NOT the dev environment setup — for that, see `context/setup.md` after population.
+This file contains the prompts to populate the scaffold. It is NOT the dev environment setup — for that, see `context/setup.md`.
 
-This scaffold is currently empty. Follow the steps below to populate it for your project.
+This scaffold is already populated (V1 is built). These prompts are kept for re-populating from scratch; for routine drift use `mex check` / `.mex/sync.sh` instead.
 
 ## Recommended: Use setup.sh
 
