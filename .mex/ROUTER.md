@@ -50,14 +50,14 @@ See `context/impl-spec.md` for the concrete build and `context/decisions.md` for
   joining chunks→source_files. A one-time `backfillCwd` (run at index/watch/serve startup)
   fills it for data indexed before the column existed. The session API returns it home-relative.
 - Web app: Vue 3 + Vite + shadcn-vue + Tailwind 4. Two-panel layout (`App.vue`): a persistent
-  left **search sidebar** (`components/SearchSidebar.vue`, search box pinned on top, results
+  left **search sidebar** (`web/src/components/SearchSidebar.vue`, search box pinned on top, results
   below) and a main panel that shows the open session (`RouterView`). The sidebar is
   drag-resizable (handle between the panels; width persisted to localStorage, default ~30%,
   clamped 260px–min(60%,760px)); sidebar and main scroll independently (root is `h-screen`,
   panels `overflow-y-auto`). Results are real links (cmd/middle-click opens a new tab); clicking
   one opens the session in the main panel and carries `q` along in the URL. The query lives in
   the URL (`?q=…`) so back-nav restores it, plus a localStorage recent-search dropdown. `/` shows
-  a welcome placeholder (`views/SearchView.vue`); `/session/:id` shows the transcript. The
+  a welcome placeholder (`web/src/views/SearchView.vue`); `/session/:id` shows the transcript. The
   session view has NO line numbers. The session view renders a FAITHFUL transcript read
   from the raw log (not the lossy index): `/api/session/:id` → `src/render/` parses each of the
   session's files (claude/codex/pi JSONL + opencode SQLite via `OpenCodeSource.readTranscript`),
@@ -69,7 +69,7 @@ See `context/impl-spec.md` for the concrete build and `context/decisions.md` for
   page the global header hosts the session controls (agent / session id + copy / working
   dir + copy-log-path; no back button — the sidebar is always present) via a shared
   `sessionHeader` store. Live queue Progress bar polls `/api/status`. Copy buttons go through
-  `lib/clipboard.ts` `copyText`, which falls back to a hidden-textarea
+  `web/src/lib/clipboard.ts` `copyText`, which falls back to a hidden-textarea
   `execCommand('copy')` when `navigator.clipboard` is absent (insecure http:// origins).
 
 **Known issues / follow-ups (non-blocking):**
