@@ -359,6 +359,17 @@ describe('Store', () => {
       store.addChunk(makeChunk({ sessionId: 's1', text: 'hi' }));
       expect(store.recentSessions()[0]?.cwd).toBe('');
     });
+
+    it('returns exactly one row per session even when the latest timestamp ties', () => {
+      // Two chunks share the max timestamp; the later-inserted (higher id) wins.
+      store.addChunk(makeChunk({ sessionId: 's1', lineNumber: 1, text: 'tie A', timestamp: '2026-01-01T00:00:09Z' }));
+      store.addChunk(makeChunk({ sessionId: 's1', lineNumber: 2, text: 'tie B', timestamp: '2026-01-01T00:00:09Z' }));
+
+      const rows = store.recentSessions();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.snippet).toBe('tie B');
+      expect(rows[0]?.lineNumber).toBe(2);
+    });
   });
 
   describe('source_files', () => {

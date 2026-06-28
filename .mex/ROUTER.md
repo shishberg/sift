@@ -59,7 +59,9 @@ See `context/impl-spec.md` for the concrete build and `context/decisions.md` for
   the URL (`?q=…`) so back-nav restores it, plus a localStorage recent-search dropdown.
   With no query the sidebar lists the most recently touched sessions (distinct sessions ordered by
   most recent message; one row per session previewing that latest message) from `GET /api/recent`
-  (`store.recentSessions`, a per-session `ROW_NUMBER()` window). The search box shows an `X` clear
+  (`store.recentSessions`: top-N sessions by `MAX(timestamp)`, then each one's latest chunk, served
+  by the `chunks(session_id, timestamp)` index — without it the cwd subquery made this a ~60s scan).
+  The search box shows an `X` clear
   button while a query is present; clearing drops `q` and reverts to the recent list. `/` shows
   a welcome placeholder (`web/src/views/SearchView.vue`); `/session/:id` shows the transcript. The
   session view has NO line numbers. The session view renders a FAITHFUL transcript read

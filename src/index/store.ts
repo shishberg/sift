@@ -242,33 +242,43 @@ export class Store {
       ORDER  BY file_path
     `);
 
-    // Most recent message per session, newest first. The window picks one row
-    // per session_id (the latest by timestamp, id as a tiebreak); the correlated
-    // subquery resolves cwd the same way getSessionCwd does.
+    // Most recent message per session, newest first. Done in two index-backed
+    // steps so it never scans the whole chunks table: `top` picks the N most
+    // recently active sessions (GROUP BY + MAX over chunks_session_ts_idx), then
+    // each session's single latest chunk is fetched (id tiebreak for equal
+    // timestamps). The correlated subquery resolves cwd like getSessionCwd.
+    // (A ROW_NUMBER() window over all chunks did the same thing but took ~60s on
+    // a 195k-row index — see chunks_session_ts_idx.)
     this.stmtRecentSessions = this.db.prepare(`
+      WITH top AS (
+        SELECT session_id, MAX(timestamp) AS ts
+        FROM   chunks
+        GROUP  BY session_id
+        ORDER  BY ts DESC
+        LIMIT  ?
+      )
       SELECT
-        recent.session_id  AS sessionId,
-        recent.agent_type  AS agentType,
-        recent.file_path   AS filePath,
-        recent.line_number AS lineNumber,
-        recent.role        AS role,
-        recent.text        AS snippet,
-        recent.timestamp   AS timestamp,
+        c.session_id  AS sessionId,
+        c.agent_type  AS agentType,
+        c.file_path   AS filePath,
+        c.line_number AS lineNumber,
+        c.role        AS role,
+        c.text        AS snippet,
+        c.timestamp   AS timestamp,
         (
           SELECT sf.cwd FROM source_files sf
           WHERE sf.cwd IS NOT NULL
-            AND sf.path IN (SELECT DISTINCT file_path FROM chunks WHERE session_id = recent.session_id)
+            AND sf.path IN (SELECT DISTINCT file_path FROM chunks WHERE session_id = c.session_id)
           LIMIT 1
         ) AS cwd
-      FROM (
-        SELECT
-          session_id, agent_type, file_path, line_number, role, text, timestamp,
-          ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY timestamp DESC, id DESC) AS rn
-        FROM chunks
-      ) AS recent
-      WHERE recent.rn = 1
-      ORDER BY recent.timestamp DESC
-      LIMIT ?
+      FROM top
+      JOIN chunks c ON c.id = (
+        SELECT id FROM chunks
+        WHERE session_id = top.session_id
+        ORDER BY timestamp DESC, id DESC
+        LIMIT 1
+      )
+      ORDER BY c.timestamp DESC
     `);
 
     // ---- transactions ----
@@ -379,6 +389,15 @@ export class Store {
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS chunks_needs_embed_idx
       ON chunks(id) WHERE needs_embed = 1
+    `);
+
+    // Composite index on (session_id, timestamp): serves every per-session lookup
+    // — recentSessions' grouping + latest-row fetch, getSessionChunks/getSessionFiles'
+    // session_id equality, and the cwd resolution subquery. Without it those are
+    // full table scans; recentSessions in particular went from ~60s to ~20ms.
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS chunks_session_ts_idx
+      ON chunks(session_id, timestamp)
     `);
   }
 
