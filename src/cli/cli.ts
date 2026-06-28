@@ -31,7 +31,7 @@ export const HELP_TEXT = `
 agent-search — search across Claude, Codex, and pi agent session transcripts.
 
 USAGE
-  agent-search <query> [--limit N]
+  agent-search <query> [--limit N] [--format text|json]
   agent-search show <sessionId> [--tools]
   agent-search index
   agent-search watch
@@ -41,8 +41,10 @@ USAGE
 
 COMMANDS
   <query>
-      Search indexed sessions. Prints ranked results — each line shows:
-        session id, agent type, file:line, role, and a text snippet.
+      Search indexed sessions. Prints ranked results — each result shows a
+      header (session id, agent type, file:line, role, datetime, working dir)
+      with the matching snippet on the line below. Use --format json for the
+      raw result objects (full ISO timestamps) instead.
 
   show <sessionId>
       Print the full transcript for a session. User and assistant messages
@@ -74,6 +76,7 @@ COMMANDS
 
 OPTIONS
   --limit N     Max search results to return (default: 20).
+  --format F    Output format for search: text (default) or json.
   --tools       Include tool call chunks in transcript output (show command).
   --port N      Port for the serve command (default: ${DEFAULT_PORT}).
   --watch       Start watcher + embed worker alongside the server (serve only).
@@ -138,14 +141,57 @@ export function homeRelative(absPath: string, home: string): string {
   return absPath;
 }
 
+/**
+ * Format an ISO timestamp the way the web UI does: "28 Jun 13:25". Drops the
+ * day & month when it's today (today → "13:25") and the year when it's this
+ * year (this year → "28 Jun 13:25", otherwise → "5 Jan 2024 08:15"). Empty or
+ * unparseable input returns ''.
+ *
+ * @param now  Reference "current time" — injectable for deterministic tests.
+ */
+export function formatTimestamp(iso: string, now: Date = new Date()): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  const sameDay =
+    d.getDate() === now.getDate() &&
+    d.getMonth() === now.getMonth() &&
+    d.getFullYear() === now.getFullYear();
+  if (sameDay) return time;
+  const dayMonth = `${d.getDate()} ${d.toLocaleString('en-US', { month: 'short' })}`;
+  const datePart = d.getFullYear() === now.getFullYear() ? dayMonth : `${dayMonth} ${d.getFullYear()}`;
+  return `${datePart} ${time}`;
+}
+
+/**
+ * Format one search result as a two-line block: a metadata header, then the
+ * snippet on its own indented line below it. The snippet has all runs of
+ * whitespace (including newlines) squashed to single spaces so each result
+ * stays compact and readable. Long snippets are truncated with an ellipsis.
+ *
+ *   test-session-id  [claude] session.jsonl:10  [user]  src/y  28 Jun 13:25
+ *     the snippet text, newlines squashed
+ */
 export function formatResult(r: SearchResult): string {
   const file = basename(r.filePath);
   const loc = `${file}:${r.lineNumber}`;
+
+  const headerParts = [r.sessionId, `[${r.agentType}]`, loc, `[${r.role}]`];
+  // Working dir then datetime last, matching the web UI ordering.
+  const cwd = homeRelative(r.cwd, homedir());
+  if (cwd) headerParts.push(cwd);
+  const when = formatTimestamp(r.timestamp);
+  if (when) headerParts.push(when);
+  const header = headerParts.join('  ');
+
+  const squashed = r.snippet.replace(/\s+/g, ' ').trim();
   const snippet =
-    r.snippet.length > SNIPPET_DISPLAY_MAX
-      ? r.snippet.slice(0, SNIPPET_DISPLAY_MAX) + '…'
-      : r.snippet;
-  return `${r.sessionId}  [${r.agentType}] ${loc}  [${r.role}]  ${snippet}`;
+    squashed.length > SNIPPET_DISPLAY_MAX
+      ? squashed.slice(0, SNIPPET_DISPLAY_MAX) + '…'
+      : squashed;
+
+  return `${header}\n  ${snippet}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +204,8 @@ export function formatResult(r: SearchResult): string {
  * @param query     Plain search string.
  * @param deps.searchFn  Bound search function (store + embedder pre-applied).
  * @param opts.limit     Max results (forwarded to searchFn).
+ * @param opts.format    'json' dumps the raw results array (full timestamps);
+ *                       'text' (default) prints the readable two-line blocks.
  * @param opts.write     Output writer (console.log in prod, captured array in tests).
  */
 export async function cmdSearch(
@@ -165,18 +213,25 @@ export async function cmdSearch(
   deps: {
     searchFn: (q: string, opts?: { limit?: number }) => Promise<SearchResult[]>;
   },
-  opts: { limit?: number; write: (s: string) => void },
+  opts: { limit?: number; format?: 'text' | 'json'; write: (s: string) => void },
 ): Promise<void> {
   const results = await deps.searchFn(query, { limit: opts.limit });
+
+  if (opts.format === 'json') {
+    opts.write(JSON.stringify(results, null, 2));
+    return;
+  }
 
   if (results.length === 0) {
     opts.write('No results found.');
     return;
   }
 
-  for (const r of results) {
+  // A blank line between results keeps them visually separated.
+  results.forEach((r, i) => {
+    if (i > 0) opts.write('');
     opts.write(formatResult(r));
-  }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -393,6 +448,8 @@ export interface ParsedCli {
   query?: string;
   sessionId?: string;
   limit?: number;
+  /** Raw --format value, validated by main() ('text' | 'json'). */
+  format?: string;
   showTools?: boolean;
   port?: number;
   watch?: boolean;
@@ -441,34 +498,40 @@ export function parseCli(argv: string[]): ParsedCli {
   }
 
   // Default: everything that isn't a known flag becomes the search query.
-  // Strip ALL --limit <N> occurrences; use the last valid one found.
-  const limitOccurrences: number[] = [];
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--limit') limitOccurrences.push(i);
-  }
-
-  let limit: number | undefined;
+  // Strip value-taking flags (and their values) wherever they appear; the last
+  // occurrence of each wins. NaN/empty values are passed through for main() to
+  // reject with a friendly message.
+  const valueFlags = new Set(['--limit', '--format']);
   const indicesToDrop = new Set<number>();
+  let limit: number | undefined;
+  let format: string | undefined;
 
-  for (const idx of limitOccurrences) {
-    indicesToDrop.add(idx);
-    const valueIdx = idx + 1;
-    if (valueIdx < argv.length && argv[valueIdx] !== '--limit') {
-      indicesToDrop.add(valueIdx);
-      const raw = argv[valueIdx]!;
-      const parsed = parseInt(raw, 10);
-      // Accept only positive integers; ignore NaN / zero / negative.
-      if (!isNaN(parsed) && parsed > 0 && String(parsed) === raw.trim()) {
-        limit = parsed;
-      } else {
-        limit = NaN; // signal a bad value to main()
-      }
+  for (let i = 0; i < argv.length; i++) {
+    const flag = argv[i]!;
+    if (!valueFlags.has(flag)) continue;
+    indicesToDrop.add(i);
+    const valueIdx = i + 1;
+    const value = argv[valueIdx];
+    const hasValue = value !== undefined && !valueFlags.has(value);
+    if (hasValue) indicesToDrop.add(valueIdx);
+
+    if (flag === '--limit') {
+      if (!hasValue) continue; // bare --limit: leave undefined (unchanged behavior)
+      const parsed = parseInt(value!, 10);
+      // Accept only positive integers; signal a bad value with NaN.
+      limit =
+        !isNaN(parsed) && parsed > 0 && String(parsed) === value!.trim()
+          ? parsed
+          : NaN;
+    } else {
+      // --format: store the raw value (or '' for a bare flag) for main() to validate.
+      format = hasValue ? value! : '';
     }
   }
 
   const queryTokens = argv.filter((_, i) => !indicesToDrop.has(i));
   const query = queryTokens.join(' ');
-  return { command: 'search', query, limit };
+  return { command: 'search', query, limit, format };
 }
 
 // ---------------------------------------------------------------------------
@@ -556,6 +619,12 @@ async function main(): Promise<void> {
       process.exit(1);
     }
 
+    if (parsed.format !== undefined && parsed.format !== 'text' && parsed.format !== 'json') {
+      console.error("--format must be 'text' or 'json'");
+      process.exit(1);
+    }
+    const format: 'text' | 'json' = parsed.format === 'json' ? 'json' : 'text';
+
     const store = new Store();
     const embedder = new OllamaEmbedder();
 
@@ -574,7 +643,7 @@ async function main(): Promise<void> {
       await cmdSearch(
         parsed.query,
         { searchFn: (q, opts) => search(q, { store, embedder }, opts) },
-        { limit: parsed.limit, write: (s) => console.log(s) },
+        { limit: parsed.limit, format, write: (s) => console.log(s) },
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   formatResult,
+  formatTimestamp,
   renderProgressBar,
   cmdSearch,
   cmdShow,
@@ -12,6 +13,7 @@ import {
 } from './cli.js';
 import type { SearchResult } from '../search/search.js';
 import type { Chunk } from '../types.js';
+import { homedir } from 'node:os';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -121,6 +123,72 @@ describe('formatResult', () => {
     // Should not be 300 chars of x — some truncation should have happened
     expect(line.length).toBeLessThan(300 + 100); // allow header overhead but not full 300
   });
+
+  it('puts the snippet on its own line below the header', () => {
+    const line = formatResult(makeSearchResult({ snippet: 'the body' }));
+    const [header, ...body] = line.split('\n');
+    expect(header).toContain('test-session-id'); // metadata on the header line
+    expect(header).not.toContain('the body'); // snippet is NOT on the header line
+    expect(body.join('\n')).toContain('the body'); // snippet is below
+  });
+
+  it('squashes newlines and runs of whitespace in the snippet', () => {
+    const line = formatResult(makeSearchResult({ snippet: 'a\n\nb\t  c' }));
+    expect(line).toContain('a b c');
+    // No raw newline should survive inside the snippet portion.
+    const snippetPortion = line.split('\n').slice(1).join('\n');
+    expect(snippetPortion).not.toMatch(/a\s*\n\s*b/);
+  });
+
+  it('shows the working directory home-relative in the header', () => {
+    const line = formatResult(
+      makeSearchResult({ cwd: `${homedir()}/src/proj` }),
+    );
+    expect(line).toContain('src/proj');
+    expect(line).not.toContain(homedir());
+  });
+
+  it('includes a human-readable datetime in the header', () => {
+    const line = formatResult(
+      makeSearchResult({ timestamp: '2020-03-15T10:30:00Z' }),
+    );
+    // Old enough that the year is always shown regardless of "now".
+    expect(line).toContain('2020');
+    expect(line).toContain('Mar');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatTimestamp
+// ---------------------------------------------------------------------------
+
+describe('formatTimestamp', () => {
+  it('shows only the time when the timestamp is today', () => {
+    const now = new Date(2026, 5, 28, 14, 0);
+    const d = new Date(2026, 5, 28, 13, 25);
+    expect(formatTimestamp(d.toISOString(), now)).toMatch(/^\d{2}:\d{2}$/);
+  });
+
+  it('drops the year when the timestamp is this year', () => {
+    const now = new Date(2026, 7, 1, 9, 0);
+    const d = new Date(2026, 5, 28, 13, 25);
+    const out = formatTimestamp(d.toISOString(), now);
+    expect(out).toContain('28 Jun');
+    expect(out).not.toContain('2026');
+  });
+
+  it('includes the year for a timestamp in a different year', () => {
+    const now = new Date(2026, 5, 28, 9, 0);
+    const d = new Date(2024, 0, 5, 8, 15);
+    const out = formatTimestamp(d.toISOString(), now);
+    expect(out).toContain('5 Jan');
+    expect(out).toContain('2024');
+  });
+
+  it('returns empty string for an empty or invalid timestamp', () => {
+    expect(formatTimestamp('')).toBe('');
+    expect(formatTimestamp('not-a-date')).toBe('');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -192,6 +260,48 @@ describe('cmdSearch', () => {
     const firstIdx = output.indexOf('first');
     const secondIdx = output.indexOf('second');
     expect(firstIdx).toBeLessThan(secondIdx);
+  });
+
+  it('separates results with a blank line in text mode', async () => {
+    const lines: string[] = [];
+    const results: SearchResult[] = [
+      makeSearchResult({ sessionId: 'first' }),
+      makeSearchResult({ sessionId: 'second' }),
+    ];
+    await cmdSearch(
+      'query',
+      { searchFn: async () => results },
+      { write: (s) => lines.push(s) },
+    );
+    expect(lines.join('\n')).toContain('\n\n');
+  });
+
+  it('emits a JSON array with full timestamps in json mode', async () => {
+    const lines: string[] = [];
+    const results: SearchResult[] = [
+      makeSearchResult({ sessionId: 'sess-json', timestamp: '2026-01-02T03:04:05Z' }),
+    ];
+    await cmdSearch(
+      'query',
+      { searchFn: async () => results },
+      { format: 'json', write: (s) => lines.push(s) },
+    );
+
+    const parsed = JSON.parse(lines.join('\n'));
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].sessionId).toBe('sess-json');
+    expect(parsed[0].timestamp).toBe('2026-01-02T03:04:05Z');
+  });
+
+  it('emits an empty JSON array (not a message) for no results in json mode', async () => {
+    const lines: string[] = [];
+    await cmdSearch(
+      'query',
+      { searchFn: async () => [] },
+      { format: 'json', write: (s) => lines.push(s) },
+    );
+    expect(JSON.parse(lines.join('\n'))).toEqual([]);
   });
 });
 
@@ -404,6 +514,32 @@ describe('parseCli', () => {
     expect(args.limit).toBe(10);
     // Neither --limit flag should leak into the query
     expect(args.query).toBe('query');
+  });
+
+  it('parses --format json and strips it from the query', () => {
+    const args = parseCli(['my query', '--format', 'json']);
+    expect(args.command).toBe('search');
+    expect(args.format).toBe('json');
+    expect(args.query).toBe('my query');
+  });
+
+  it('parses --format text', () => {
+    const args = parseCli(['my query', '--format', 'text']);
+    expect(args.format).toBe('text');
+    expect(args.query).toBe('my query');
+  });
+
+  it('preserves an unknown --format value for main() to reject', () => {
+    const args = parseCli(['my query', '--format', 'xml']);
+    expect(args.format).toBe('xml');
+    expect(args.query).toBe('my query');
+  });
+
+  it('parses --limit and --format together', () => {
+    const args = parseCli(['my query', '--limit', '5', '--format', 'json']);
+    expect(args.limit).toBe(5);
+    expect(args.format).toBe('json');
+    expect(args.query).toBe('my query');
   });
 
   it('parses the show subcommand with a session id', () => {
