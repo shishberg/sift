@@ -50,10 +50,16 @@ See `context/impl-spec.md` for the concrete build and `context/decisions.md` for
   fills it for data indexed before the column existed. The session API returns it home-relative.
 - Web app: Vue 3 + Vite + shadcn-vue + Tailwind 4; search + session view. Results are real
   links (open in new tab); the query lives in the URL (`/?q=…`) so back-nav restores it, plus
-  a localStorage recent-search dropdown. Session view renders message text as markdown
-  (markdown-it), styles user/assistant in distinct coloured boxes, and scrolls to the
-  matched chunk. On a session page the global header hosts the session controls (back / agent /
-  session id + copy / working dir + copy-log-path / hide-tools) via a shared `sessionHeader`
+  a localStorage recent-search dropdown. The session view renders a FAITHFUL transcript read
+  from the raw log (not the lossy index): `/api/session/:id` → `src/render/` parses each of the
+  session's files (claude/codex/pi JSONL + opencode SQLite via `OpenCodeSource.readTranscript`),
+  pairing tool calls with their untruncated output, and returns `items: TranscriptItem[]`. The
+  index only supplies which files belong to a session (`store.getSessionFiles`) + cwd. The view
+  renders these with vendored ai-elements `Message` bubbles (user right / assistant left, keeping
+  the existing colours, markdown-it for prose) and collapsible `Tool` blocks (paired
+  input/output, open on match); it scrolls to and ring-highlights the matched item. On a session
+  page the global header hosts the session controls (back / agent / session id + copy / working
+  dir + copy-log-path) via a shared `sessionHeader`
   store. Live queue Progress bar polls `/api/status`. Copy buttons go through
   `lib/clipboard.ts` `copyText`, which falls back to a hidden-textarea
   `execCommand('copy')` when `navigator.clipboard` is absent (insecure http:// origins).
