@@ -397,9 +397,15 @@ body {
 }
 
 /* ── Matched chunk highlight ────────────────────────────────────────────── */
+/* Highlight the bubble/tool itself (not the full-width row) so it hugs the
+   left/right-aligned shape instead of floating a ring across the whole row. */
 .chunk-matched {
-  box-shadow: 0 0 0 2px var(--violet);
   scroll-margin-top: 64px;
+}
+.chunk-matched .bubble,
+.chunk-matched .tool-block {
+  border-color: var(--violet);
+  box-shadow: 0 0 0 1px var(--violet);
 }
 
 /* ── Scrollbar ──────────────────────────────────────────────────────────── */
