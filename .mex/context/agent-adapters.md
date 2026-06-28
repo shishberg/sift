@@ -50,10 +50,17 @@ exact fields/types after first implementation. Expected shape:]
 - `toolCall` (compact name + key args, for FTS) — optional
 - `timestamp`
 
-## V1 adapters
-- **claude** — `~/.claude/projects/` — [TO BE DETERMINED — document the JSON schema after inspecting real logs]
-- **codex** — `~/.codex/sessions/` — [TO BE DETERMINED — document the JSON schema]
-- **pi** — `~/.pi/agent/sessions/` — [TO BE DETERMINED — document the JSON schema]
+## V1 sources
+JSONL adapters (file-watched):
+- **claude** — `~/.claude/projects/`
+- **codex** — `~/.codex/sessions/`
+- **pi** — `~/.pi/agent/sessions/`
+
+Non-JSONL source (polled, not an adapter):
+- **opencode** — SQLite DB at `~/.local/share/opencode/opencode.db`. Read by
+  `src/sources/opencode.ts` (`OpenCodeSource`), one-shot import at index/watch/
+  serve startup with a persisted cursor. cwd comes from `session.directory`. Not
+  in the adapter registry because it isn't a watched JSONL file.
 
 ## Registry
 Adapters are registered so the watcher can pick the right one per directory/file.
@@ -74,7 +81,17 @@ adapter (`src/adapters/claude.ts`, indexed text) and the faithful renderer
 logs); search snippets only update for chunks indexed after this — re-index to
 clean existing rows. Add new harness tags to the registry; nothing else changes.
 
+Other agents (surveyed 2026-06-28):
+- **codex** injects an `<environment_context>` block (`<cwd>`/`<shell>`/
+  `<current_date>`/`<timezone>`) plus an AGENTS.md/`user_instructions` preamble
+  into a synthetic first user message — its own harness noise, a different shape
+  from claude's. NOT yet stripped (the registry is wired only into the claude
+  path). If we tackle it, drop it codex-side only — the nested tag names (`cwd`,
+  `shell`) are too generic to strip globally.
+- **pi** — clean. No injected wrapper tags (stray `<command-name>` hits were file
+  content inside tool results, not annotations).
+- **opencode** — clean. No systematic wrapper tags.
+
 ## Out of scope
-- opencode (own SQLite DB, not JSONL) — not V1.
 - Hooks-based ingestion — kept open as a future per-agent capability, but adapters
   are about parsing, not triggering.
