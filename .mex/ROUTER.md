@@ -21,6 +21,7 @@ edges:
   - target: context/agent-adapters.md
     condition: when adding an agent or touching agent-specific parsing
 last_updated: 2026-06-28
+web_layout_updated: 2026-06-28
 ---
 
 # Session Bootstrap
@@ -48,9 +49,16 @@ See `context/impl-spec.md` for the concrete build and `context/decisions.md` for
   or opencode's `session.directory`, stored on `source_files.cwd`, resolved per session by
   joining chunks→source_files. A one-time `backfillCwd` (run at index/watch/serve startup)
   fills it for data indexed before the column existed. The session API returns it home-relative.
-- Web app: Vue 3 + Vite + shadcn-vue + Tailwind 4; search + session view. Results are real
-  links (open in new tab); the query lives in the URL (`/?q=…`) so back-nav restores it, plus
-  a localStorage recent-search dropdown. The session view renders a FAITHFUL transcript read
+- Web app: Vue 3 + Vite + shadcn-vue + Tailwind 4. Two-panel layout (`App.vue`): a persistent
+  left **search sidebar** (`components/SearchSidebar.vue`, search box pinned on top, results
+  below) and a main panel that shows the open session (`RouterView`). The sidebar is
+  drag-resizable (handle between the panels; width persisted to localStorage, default ~30%,
+  clamped 260px–min(60%,760px)); sidebar and main scroll independently (root is `h-screen`,
+  panels `overflow-y-auto`). Results are real links (cmd/middle-click opens a new tab); clicking
+  one opens the session in the main panel and carries `q` along in the URL. The query lives in
+  the URL (`?q=…`) so back-nav restores it, plus a localStorage recent-search dropdown. `/` shows
+  a welcome placeholder (`views/SearchView.vue`); `/session/:id` shows the transcript. The
+  session view has NO line numbers. The session view renders a FAITHFUL transcript read
   from the raw log (not the lossy index): `/api/session/:id` → `src/render/` parses each of the
   session's files (claude/codex/pi JSONL + opencode SQLite via `OpenCodeSource.readTranscript`),
   pairing tool calls with their untruncated output, and returns `items: TranscriptItem[]`. The
@@ -58,9 +66,9 @@ See `context/impl-spec.md` for the concrete build and `context/decisions.md` for
   renders these with vendored ai-elements `Message` bubbles (user right / assistant left, keeping
   the existing colours, markdown-it for prose) and collapsible `Tool` blocks (paired
   input/output, open on match); it scrolls to and ring-highlights the matched item. On a session
-  page the global header hosts the session controls (back / agent / session id + copy / working
-  dir + copy-log-path) via a shared `sessionHeader`
-  store. Live queue Progress bar polls `/api/status`. Copy buttons go through
+  page the global header hosts the session controls (agent / session id + copy / working
+  dir + copy-log-path; no back button — the sidebar is always present) via a shared
+  `sessionHeader` store. Live queue Progress bar polls `/api/status`. Copy buttons go through
   `lib/clipboard.ts` `copyText`, which falls back to a hidden-textarea
   `execCommand('copy')` when `navigator.clipboard` is absent (insecure http:// origins).
 

@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue';
-import { RouterView, useRouter } from 'vue-router';
+import { RouterView } from 'vue-router';
 import { Progress } from '@/components/ui/progress';
 import CopyButton from '@/components/CopyButton.vue';
+import SearchSidebar from '@/components/SearchSidebar.vue';
 import { sessionHeader } from '@/lib/sessionHeader';
 import type { StatusResponse } from './types';
 
-const router = useRouter();
 const status = ref<StatusResponse>({ total: 0, embedded: 0, pending: 0 });
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -36,9 +36,48 @@ function agentBadgeClass(agentType: string | null): string {
   return 'badge badge-role';
 }
 
-function goBack(): void {
-  // Back rather than push so the search term in the URL is restored.
-  router.back();
+// ── Resizable sidebar ──────────────────────────────────────────────────────
+const SIDEBAR_KEY = 'agent-search:sidebar-width';
+const MIN_WIDTH = 260;
+const sidebarWidth = ref<number>(loadWidth());
+let dragging = false;
+
+function loadWidth(): number {
+  const raw = Number(localStorage.getItem(SIDEBAR_KEY));
+  if (raw && raw >= MIN_WIDTH) return raw;
+  return Math.round(window.innerWidth * 0.3); // default ~30%
+}
+
+function maxWidth(): number {
+  return Math.min(window.innerWidth * 0.6, 760);
+}
+
+function startResize(e: MouseEvent): void {
+  dragging = true;
+  e.preventDefault();
+  document.body.style.userSelect = 'none';
+  document.body.style.cursor = 'col-resize';
+  window.addEventListener('mousemove', onResize);
+  window.addEventListener('mouseup', stopResize);
+}
+
+function onResize(e: MouseEvent): void {
+  if (!dragging) return;
+  sidebarWidth.value = Math.max(MIN_WIDTH, Math.min(maxWidth(), e.clientX));
+}
+
+function stopResize(): void {
+  if (!dragging) return;
+  dragging = false;
+  document.body.style.userSelect = '';
+  document.body.style.cursor = '';
+  try {
+    localStorage.setItem(SIDEBAR_KEY, String(sidebarWidth.value));
+  } catch {
+    // best-effort
+  }
+  window.removeEventListener('mousemove', onResize);
+  window.removeEventListener('mouseup', stopResize);
 }
 
 onMounted(() => {
@@ -48,14 +87,16 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (pollTimer !== null) clearInterval(pollTimer);
+  window.removeEventListener('mousemove', onResize);
+  window.removeEventListener('mouseup', stopResize);
 });
 </script>
 
 <template>
-  <div class="min-h-screen flex flex-col" style="background-color: var(--bg); color: var(--fg)">
-    <!-- Header -->
+  <div class="h-screen flex flex-col overflow-hidden" style="background-color: var(--bg); color: var(--fg)">
+    <!-- Pinned top bar -->
     <header
-      class="sticky top-0 z-10 flex items-center gap-4 px-6 h-12 border-b"
+      class="flex items-center gap-4 px-6 h-12 border-b flex-shrink-0"
       style="
         background: var(--white);
         border-color: var(--border);
@@ -79,22 +120,6 @@ onUnmounted(() => {
 
         <template v-if="sessionHeader.active">
           <span style="color: var(--border)" class="flex-shrink-0">/</span>
-          <button
-            class="flex-shrink-0"
-            style="
-              background: none;
-              border: 1px solid var(--border);
-              border-radius: 4px;
-              padding: 3px 9px;
-              font-size: 12px;
-              cursor: pointer;
-              color: var(--muted-fg);
-              white-space: nowrap;
-            "
-            @click="goBack"
-          >
-            ← Search
-          </button>
           <span
             v-if="sessionHeader.agentType"
             :class="agentBadgeClass(sessionHeader.agentType)"
@@ -148,9 +173,23 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <!-- Page content -->
-    <main class="flex-1">
-      <RouterView />
-    </main>
+    <!-- Body: search sidebar | main session panel -->
+    <div class="flex flex-1" style="min-height: 0">
+      <aside
+        class="flex-shrink-0 overflow-hidden"
+        :style="{ width: sidebarWidth + 'px', background: 'var(--white)' }"
+      >
+        <SearchSidebar />
+      </aside>
+
+      <!-- Drag handle -->
+      <div class="resizer" @mousedown="startResize" title="Drag to resize">
+        <div class="resizer-grip"></div>
+      </div>
+
+      <main class="flex-1 overflow-y-auto" style="min-width: 0">
+        <RouterView />
+      </main>
+    </div>
   </div>
 </template>

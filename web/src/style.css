@@ -176,16 +176,50 @@ body {
 .transcript-row {
   position: relative;
 }
-.line-label {
-  display: block;
-  margin-top: 2px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 10px;
-  color: var(--border);
-  letter-spacing: 0.02em;
+
+/* ── Sidebar drag handle ───────────────────────────────────────────────── */
+.resizer {
+  flex: 0 0 auto;
+  width: 6px;
+  cursor: col-resize;
+  background: var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s;
 }
-.line-label-right {
-  text-align: right;
+.resizer:hover,
+.resizer:active {
+  background: var(--violet-border);
+}
+.resizer-grip {
+  width: 2px;
+  height: 28px;
+  border-radius: 1px;
+  background: var(--muted-fg);
+  opacity: 0.35;
+}
+.resizer:hover .resizer-grip {
+  opacity: 0.6;
+}
+
+/* ── Sidebar result links ──────────────────────────────────────────────── */
+.result-link {
+  border: 1px solid transparent;
+  background: var(--white);
+  text-decoration: none;
+  color: inherit;
+  transition: background 0.12s, border-color 0.12s;
+}
+.result-link:hover {
+  background: var(--surface);
+}
+.result-active {
+  background: var(--violet-subtle);
+  border-color: var(--violet-border);
+}
+.result-active:hover {
+  background: var(--violet-subtle);
 }
 
 /* ── Message bubbles (ai-elements Message + our colours) ───────────────── */

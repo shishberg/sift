@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, nextTick, computed, ref } from 'vue';
+import { onUnmounted, nextTick, computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import type { SessionResponse, TranscriptItem } from '@/types';
 import { renderMarkdown } from '@/lib/markdown';
@@ -68,8 +68,17 @@ function toolStatus(item: TranscriptItem): 'completed' | 'pending' | 'error' {
   return 'completed';
 }
 
-onMounted(() => {
-  void loadSession();
+// Load whenever the session id changes. This covers the first mount AND
+// navigating from one open session to another: vue-router reuses this same
+// component instance across /session/:id routes, so onMounted would not refire.
+watch(sessionId, () => void loadSession(), { immediate: true });
+
+// Clicking another result within the already-open session changes the matched
+// file/line but not the id, so the loader above won't run — just re-scroll.
+watch([matchFile, matchLine], async () => {
+  if (loading.value || !session.value) return;
+  await nextTick();
+  scrollToMatch();
 });
 
 onUnmounted(() => {
@@ -106,7 +115,6 @@ onUnmounted(() => {
               <ToolOutput :output="item.tool?.output" :is-error="item.tool?.isError" />
             </ToolContent>
           </Tool>
-          <span class="line-label">:{{ item.lineNumbers[0] }}</span>
         </div>
 
         <!-- User / assistant message -->
@@ -120,7 +128,6 @@ onUnmounted(() => {
               <div class="md-body" v-html="renderedHtml(item.text)"></div>
             </MessageContent>
           </Message>
-          <span class="line-label" :class="item.role === 'user' ? 'line-label-right' : ''">:{{ item.lineNumbers[0] }}</span>
         </div>
       </template>
 
