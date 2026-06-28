@@ -13,24 +13,31 @@ export interface SearchResult {
   score: number;
 }
 
-/** Mirror of the backend Chunk shape. */
-export interface Chunk {
-  agentType: AgentType;
-  sessionId: string;
-  filePath: string;
-  lineNumber: number;
+/** Mirror of backend ToolDetail. */
+export interface ToolDetail {
+  name: string;
+  input: string;
+  output?: string;
+  isError?: boolean;
+}
+
+/** Mirror of backend TranscriptItem (faithful, log-derived). */
+export interface TranscriptItem {
   role: 'user' | 'assistant' | 'tool';
   text: string;
-  toolCall?: { name: string; args: string };
+  tool?: ToolDetail;
+  filePath: string;
+  lineNumbers: number[];
   timestamp: string;
 }
 
 export interface SessionResponse {
   sessionId: string;
+  agentType: AgentType | null;
   filePath: string;
   /** Working directory the session ran in, relative to $HOME ('' if unknown). */
   cwd: string;
-  chunks: Chunk[];
+  items: TranscriptItem[];
 }
 
 export interface StatusResponse {
