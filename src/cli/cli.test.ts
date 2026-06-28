@@ -27,6 +27,7 @@ function makeSearchResult(overrides: Partial<SearchResult> = {}): SearchResult {
     snippet: 'test snippet text',
     timestamp: '2026-01-01T00:00:00Z',
     score: 0.9,
+    cwd: '',
     ...overrides,
   };
 }

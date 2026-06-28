@@ -286,15 +286,24 @@ const resultCount = computed(() => results.value.length);
                   class="badge badge-role"
                   style="font-size: 10px; padding: 1px 5px"
                 >{{ result.role }}</span>
+                <!-- Right-aligned: working dir (ellipsised) then the date. -->
                 <span
+                  class="flex items-center gap-2"
                   style="
                     margin-left: auto;
+                    min-width: 0;
                     font-size: 11px;
                     color: var(--muted-fg);
                     font-family: 'JetBrains Mono', ui-monospace, monospace;
-                    white-space: nowrap;
                   "
-                >{{ formatResultTime(result.timestamp) }}</span>
+                >
+                  <span
+                    v-if="result.cwd"
+                    :title="result.cwd"
+                    style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0"
+                  >{{ result.cwd }}</span>
+                  <span style="white-space: nowrap; flex-shrink: 0">{{ formatResultTime(result.timestamp) }}</span>
+                </span>
               </div>
 
               <!-- Snippet -->

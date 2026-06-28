@@ -705,7 +705,11 @@ async function main(): Promise<void> {
 
     const { url, server } = await startServer(
       {
-        search: (q, limit) => search(q, { store, embedder }, { limit }),
+        search: async (q, limit) => {
+          const results = await search(q, { store, embedder }, { limit });
+          // Make cwd $HOME-relative for display, matching the session endpoint.
+          return results.map((r) => ({ ...r, cwd: homeRelative(r.cwd, homedir()) }));
+        },
         getSession: (sessionId) => {
           const items = readTranscript(sessionId, {
             getSessionFiles: (id) => store.getSessionFiles(id),

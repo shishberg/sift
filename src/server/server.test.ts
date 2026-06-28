@@ -53,6 +53,7 @@ const fakeResult: SearchResult = {
   snippet: 'Hello world',
   timestamp: '2024-01-01T00:00:00.000Z',
   score: 0.9,
+  cwd: 'proj/foo',
 };
 
 const fakeSession: SessionResponse = {

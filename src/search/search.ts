@@ -15,6 +15,9 @@ export interface SearchResult {
   snippet: string;
   timestamp: string;
   score: number;
+  /** Working directory the session ran in ('' if unknown). Absolute here; the
+   *  HTTP layer makes it $HOME-relative, like the session endpoint. */
+  cwd: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -169,7 +172,18 @@ export async function search(
   // Fuse with RRF.
   const fused = rrfFuse([vecIds, ftsIds], { limit });
 
-  // Load full chunks and build results.
+  // Load full chunks and build results. cwd is per-session, so cache lookups
+  // across results that share a session.
+  const cwdCache = new Map<string, string>();
+  const cwdFor = (sessionId: string): string => {
+    let c = cwdCache.get(sessionId);
+    if (c === undefined) {
+      c = store.getSessionCwd(sessionId) ?? '';
+      cwdCache.set(sessionId, c);
+    }
+    return c;
+  };
+
   const results: SearchResult[] = [];
   for (const { id, score } of fused) {
     const chunk = store.getChunk(id);
@@ -183,6 +197,7 @@ export async function search(
       snippet: makeSnippet(chunk),
       timestamp: chunk.timestamp,
       score,
+      cwd: cwdFor(chunk.sessionId),
     });
   }
 

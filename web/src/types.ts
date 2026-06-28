@@ -11,6 +11,8 @@ export interface SearchResult {
   snippet: string;
   timestamp: string;
   score: number;
+  /** Working directory the session ran in, relative to $HOME ('' if unknown). */
+  cwd: string;
 }
 
 /** Mirror of backend ToolDetail. */
