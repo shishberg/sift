@@ -11,8 +11,6 @@ export interface SessionHeaderState {
   filePath: string;
   /** Working directory relative to $HOME, for display. */
   cwd: string;
-  showTools: boolean;
-  canToggleTools: boolean;
 }
 
 export const sessionHeader = reactive<SessionHeaderState>({
@@ -21,8 +19,6 @@ export const sessionHeader = reactive<SessionHeaderState>({
   sessionId: '',
   filePath: '',
   cwd: '',
-  showTools: false,
-  canToggleTools: false,
 });
 
 export function resetSessionHeader(): void {
@@ -31,6 +27,4 @@ export function resetSessionHeader(): void {
   sessionHeader.sessionId = '';
   sessionHeader.filePath = '';
   sessionHeader.cwd = '';
-  sessionHeader.showTools = false;
-  sessionHeader.canToggleTools = false;
 }

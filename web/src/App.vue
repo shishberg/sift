@@ -129,25 +129,8 @@ onUnmounted(() => {
         </template>
       </div>
 
-      <!-- Right: hide-tools (on a session page) + embedding progress -->
+      <!-- Right: embedding progress -->
       <div class="flex items-center gap-3 flex-shrink-0">
-        <button
-          v-if="sessionHeader.active && sessionHeader.canToggleTools"
-          style="
-            background: none;
-            border-radius: 4px;
-            padding: 3px 9px;
-            font-size: 12px;
-            cursor: pointer;
-            white-space: nowrap;
-            border: 1px solid var(--border);
-            color: var(--muted-fg);
-          "
-          @click="sessionHeader.showTools = !sessionHeader.showTools"
-        >
-          {{ sessionHeader.showTools ? 'hide tools' : 'show tools' }}
-        </button>
-
         <div class="flex items-center gap-3" style="min-width: 220px">
           <div class="flex flex-col gap-1" style="flex: 1">
             <Progress :model-value="progressValue" class="h-1.5" />
