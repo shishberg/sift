@@ -1,5 +1,5 @@
 {
-  "name": "agent-search",
+  "name": "sift",
   "version": "0.1.0",
   "description": "Searchable index of agent session logs (Claude, Codex, pi) with local CLI and web search",
   "type": "module",
@@ -7,7 +7,7 @@
     "node": ">=20"
   },
   "bin": {
-    "agent-search": "dist/cli/cli.js"
+    "sift": "dist/cli/cli.js"
   },
   "scripts": {
     "test": "vitest run",
