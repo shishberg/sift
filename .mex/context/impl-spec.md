@@ -1,7 +1,7 @@
 ---
 name: impl-spec
 description: Concrete implementation spec for the first build — locked conventions, project layout, and the exact on-disk log formats for each agent adapter. Load when implementing any component.
-last_updated: 2026-06-27
+last_updated: 2026-06-28
 ---
 
 # Implementation Spec (V1 build)
@@ -18,7 +18,9 @@ is a locked decision unless marked OPEN.
 - **TDD is mandatory** (see `superpowers:test-driven-development`): red → green → refactor.
 - **TS style:** camelCase for vars/functions, PascalCase for types/interfaces.
 - **DB columns:** snake_case.
-- **Agent type ids:** lowercase strings `claude` | `codex` | `pi`.
+- **Agent type ids:** lowercase strings `claude` | `codex` | `pi` | `opencode`.
+  The three JSONL ones are *adapters* (`JsonlAgentType`); `opencode` is a *source*
+  (SQLite, see below), not a file-watched adapter.
 - **No cloud calls** anywhere. Embeddings local only.
 - **Read-only:** never open a session log for writing.
 
@@ -27,36 +29,43 @@ is a locked decision unless marked OPEN.
 package.json, tsconfig.json, vitest.config.ts
 src/
   types.ts            # Chunk shape + shared types (the adapter contract)
+  text.ts             # shared truncation limits (TOOL_ARGS_MAX, TOOL_RESULT_MAX)
+  harness-tags.ts     # strip harness-injected XML wrapper tags from user text
   adapters/
     types.ts          # Adapter interface + registry types
     registry.ts       # buildRegistry(); pick adapter by dir/file
-    claude.ts
-    codex.ts
-    pi.ts
+    claude.ts, codex.ts, pi.ts
+  sources/
+    opencode.ts       # OpenCodeSource: index + readTranscript from opencode's SQLite DB
   index/
     store.ts          # open db, load sqlite-vec, schema, FTS5, source_files
   ingest/
     tail.ts           # byte-offset tail reader (pure, testable)
-    indexer.ts        # parse new lines -> embed -> write to store
+    indexer.ts        # EmbedWorker (drain queue) + backfillCwd
     watcher.ts        # chokidar wiring + startup backfill
   embed/
     types.ts          # Embedder interface
     ollama.ts         # ollama nomic-embed-text impl
+    guard.ts          # assertEmbedModel (model/dims must match the index)
   search/
     search.ts         # vector + FTS query, RRF fusion, result shape
+  render/
+    transcript.ts     # faithful (untruncated) transcript from raw logs, per agent
+    claude.ts, codex.ts, pi.ts, shared.ts
   cli/
-    cli.ts            # entrypoint (search, show, --help)
+    cli.ts            # entrypoint (search, show, index, watch, status, serve)
   server/
-    server.ts         # minimal HTTP API for the web app (/api/search, /api/session/:id)
-web/                  # Vue 3 + Vite + shadcn-vue app
+    server.ts         # HTTP API (/api/search, /api/recent, /api/session/:id, /api/status)
+web/                  # Vue 3 + Vite + shadcn-vue + Tailwind 4 app
 ```
 
 ## Common chunk shape (the adapter contract)
 A parsed chunk is one indexable unit produced by an adapter from one JSONL line.
 ```ts
 type Role = 'user' | 'assistant' | 'tool';
+type AgentType = 'claude' | 'codex' | 'pi' | 'opencode';
 interface Chunk {
-  agentType: 'claude' | 'codex' | 'pi';
+  agentType: AgentType;
   sessionId: string;
   filePath: string;
   lineNumber: number;      // 1-based line in the file
@@ -73,20 +82,32 @@ both text and tool_use blocks → one text chunk + one tool chunk). Adapters ret
 **Embedding rule:** embed `text` for `role` user/assistant only. Skip tool chunks and
 empty text. **FTS rule:** index `text` plus, for tool chunks, `name + args`.
 
+**Harness wrapper tags:** agents inject XML annotation tags into *user* turns
+(claude's `<command-name>`/`<local-command-*>`, codex's `<environment_context>` etc.).
+Adapters (and the renderers) run user text through `stripHarnessTags` (`harness-tags.ts`,
+a closed `HARNESS_TAGS` registry: `unwrap` keeps inner text, `drop` removes the block).
+No-op unless a registered tag is present. See `context/agent-adapters.md`.
+
 ## Adapter interface
 ```ts
 interface Adapter {
-  agentType: 'claude' | 'codex' | 'pi';
+  agentType: JsonlAgentType; // 'claude' | 'codex' | 'pi'
   /** Absolute dir this adapter owns (expanded ~). */
   rootDir: string;
   /** True if this file path belongs to this agent. */
   claims(filePath: string): boolean;
-  /** Parse one raw JSONL line into 0+ chunks. ctx carries filePath + lineNumber + any per-file state. */
+  /** Parse one raw JSONL line into 0+ chunks. ctx carries filePath + lineNumber. */
   parseLine(line: string, ctx: { filePath: string; lineNumber: number }): Chunk[];
+  /** Pull the session's working dir from a line, if present. */
+  extractCwd(line: string): string | undefined;
 }
 ```
 Session id: prefer an id carried on the record; otherwise derive from the filename
 (see per-agent notes). Adapters must be pure and side-effect-free (no disk writes).
+
+Non-JSONL agents are *sources*, not adapters: `OpenCodeSource` (`sources/opencode.ts`)
+reads opencode's SQLite DB, emits the same `Chunk` shape, persists a cursor, and is
+imported one-shot at index/watch/serve startup (cwd from `session.directory`).
 
 ---
 
@@ -146,7 +167,10 @@ Session id: prefer an id carried on the record; otherwise derive from the filena
     text, tool_name, tool_args, timestamp, needs_embed INTEGER NOT NULL DEFAULT 0)`.
     Partial index on `needs_embed` where `needs_embed = 1`. Set `needs_embed = 1`
     only for user/assistant chunks with non-empty text; everything else stays 0.
-  - `source_files(path PK, agent_type, inode, last_offset, last_size)`.
+  - `source_files(path PK, agent_type, inode, last_offset, last_size,
+    last_line_number, cwd)`. `cwd` is per-file; a session's cwd is resolved by
+    joining chunks → source_files (backfilled once via `backfillCwd`). opencode
+    gets a `source_files` row under a virtual `opencode://<id>` path.
   - `meta(key PK, value)` — store `embed_model`, `embed_dims`. A model/dims mismatch
     on open ⇒ the index must be rebuilt (surface clearly; V1 may just warn + reindex).
   - FTS5 virtual table `chunks_fts(text, tool_name, tool_args, content='chunks', content_rowid='id')`
@@ -178,32 +202,44 @@ A **single-flight** in-process consumer drains them:
 - Input: plain string. Embed as `query`. Run vector KNN (sqlite-vec) and FTS5 MATCH.
 - Merge with RRF: `score = Σ 1/(60 + rank)` over the two ranked lists, sort desc.
 - Result shape: `{ sessionId, agentType, filePath, lineNumber, role, snippet,
-  timestamp, score }`. Every result MUST carry sessionId + filePath + lineNumber.
+  timestamp, score, cwd }`. Every result MUST carry sessionId + filePath +
+  lineNumber. `cwd` is absolute here; the HTTP/CLI layers render it $HOME-relative.
 - Limit default 20.
 
 ## CLI
-- `agent-search <query>` → ranked results (session id, agent, file:line, snippet).
-- `agent-search show <sessionId>` → print the transcript (user/assistant messages by
-  default). `--help` explains how to go from a result to a transcript.
-- `agent-search index` → one-shot: scan all dirs, write rows, drain the embed queue to
-  completion (with a live progress bar), then exit. `agent-search watch` → watch + keep
-  draining (live progress bar). `agent-search status` → print `queueStats` (total /
-  embedded / pending) + a text progress bar, then exit.
+No framework: arg parsing is hand-rolled in `parseCli`, help is the `HELP_TEXT`
+constant, and each command is a pure `cmd*` handler taking injected deps; `main()`
+wires them. (Both in `cli/cli.ts`.)
+- `agent-search <query> [--limit N] [--format text|json]` → ranked results. Text =
+  a two-line block per result: header (`sessionId  [agent]  file:line  [role]  cwd
+  datetime`, cwd $HOME-relative, datetime via `formatTimestamp`) then the snippet on
+  its own indented line (whitespace squashed), blank line between. Header is ANSI-
+  coloured only on a TTY (honours `NO_COLOR`). `--format json` dumps the raw
+  `SearchResult[]` (full ISO timestamps, absolute cwd).
+- `agent-search show <sessionId> [--tools]` → print the transcript (user/assistant by
+  default; `--tools` includes tool chunks). `--help` explains result → transcript.
+- `agent-search index` → one-shot: scan all dirs + opencode, write rows, drain the
+  embed queue to completion (live progress bar), then exit. `agent-search watch` →
+  watch + keep draining. `agent-search status` → print `queueStats` + a text bar.
+- `agent-search serve [--port N] [--watch]` → start the HTTP API + web app.
 - Progress bar: hand-rolled (carriage-return), no heavy dep, driven by `queueStats()`.
 
-## Server + web (lowest priority, after CLI works)
-- `src/server/server.ts`: minimal HTTP API. `GET /api/search?q=` → results JSON.
-  `GET /api/session/:id` → transcript JSON. `GET /api/status` → `queueStats` JSON.
-  Read-only. Optionally start the watcher so the web app indexes live.
-- `web/`: Vue 3 + Vite + **shadcn-vue + Tailwind 4**. Search box → results list (each
-  shows session id + matching line) → click → session view scrolled to the match. Session
-  id in the URL. A **queue progress bar** (shadcn-vue `Progress` component,
-  https://www.shadcn-vue.com/docs/components/progress) polls `/api/status` and shows
-  indexing/embedding progress (visible during backfill since backfill = normal draining).
+## Server + web
+- `src/server/server.ts`: read-only HTTP API. `GET /api/search?q=` → results JSON.
+  `GET /api/recent` → most-recently-touched sessions (one row per session) for the
+  no-query sidebar. `GET /api/session/:id` → a FAITHFUL transcript read from the raw
+  logs via `src/render/` (untruncated, tool calls paired with output) — NOT the lossy
+  index. `GET /api/status` → `queueStats` JSON. `--watch` also starts the watcher so
+  the web app indexes live. `ServerDeps`: `search`, `getRecent`, `getSession`, `getStatus`.
+- `web/`: Vue 3 + Vite + **shadcn-vue + Tailwind 4**. Persistent left search sidebar
+  (search box + results / recent list) and a main panel showing the open session,
+  scrolled to + highlighting the match. Session id in the URL (`?q=` for the query). A
+  queue progress bar polls `/api/status`. See ROUTER "Current Project State" for the
+  full layout.
 
-## OPEN items (make a judgment call, leave a note)
-- Exact chunking (currently: one block = one chunk). Fine for V1.
-- Whether tool_result/function_call_output text is worth FTS indexing (currently: yes,
-  FTS-only, truncated). Revisit if it adds noise.
-- Server framework choice (Fastify vs node:http) — implementer picks the simplest.
+## Resolved / notes (was OPEN)
+- Chunking: one block = one chunk. Kept; fine in practice.
+- tool_result/function_call_output text: indexed FTS-only, truncated. Kept; no noise issues.
+- Server framework: plain `node:http` (no framework).
+- CLI output: human-readable text by default + `--format json`. (Was OPEN in `add-cli-command`.)
 </content>

@@ -32,7 +32,7 @@ Then read this file fully before doing anything else in this session.
 
 ## Current Project State
 
-**V1 is built and working.** Implemented via TDD, on `main`, 303 tests passing.
+**V1 is built and working.** Implemented via TDD, on `main`, 387 tests passing.
 See `context/impl-spec.md` for the concrete build and `context/decisions.md` for the why.
 
 **Working (all verified end-to-end against real logs, ~35k chunks):**
