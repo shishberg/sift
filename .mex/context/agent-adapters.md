@@ -17,7 +17,7 @@ edges:
     condition: when checking the "everything goes through the adapter" rule
   - target: patterns/add-agent-adapter.md
     condition: when actually adding support for a new agent type
-last_updated: 2026-06-28
+last_updated: 2026-06-30
 ---
 
 # Agent Adapters
@@ -53,7 +53,12 @@ exact fields/types after first implementation. Expected shape:]
 ## V1 sources
 JSONL adapters (file-watched):
 - **claude** — `~/.claude/projects/`
-- **codex** — `~/.codex/sessions/`
+- **codex** — `~/.codex/sessions/`. Content (message `content` AND a
+  `function_call_output`'s `output`) is EITHER a plain string OR an array of typed
+  blocks (`input_text`/`output_text`/`input_image`/…). `blocksToText()` normalizes
+  both to a string, keeping text blocks and dropping images — e.g. a `view_image`
+  output is `[{type:'input_image', image_url:'data:…'}]`. Skipping this left
+  `chunk.text` as an array object → SQLite "can only bind …" on insert.
 - **pi** — `~/.pi/agent/sessions/`
 
 Non-JSONL source (polled, not an adapter):
@@ -66,6 +71,19 @@ Non-JSONL source (polled, not an adapter):
 Adapters are registered so the watcher can pick the right one per directory/file.
 [TO BE DETERMINED — define the registry/interface signature after first
 implementation, then record it here so new adapters follow it.]
+
+## Subagent (sidechain) session keying — claude
+Claude writes each subagent transcript to its own file at
+`<project>/<parentSessionId>/subagents/agent-<agentId>.jsonl`. Every line in those
+files carries `sessionId` = the **parent** session id (a back-reference) and
+`isSidechain: true`. So the record's `sessionId` field is NOT that transcript's own
+id. `src/adapters/claude.ts` keys sidechain records (`isSidechain === true`) by the
+filename stem (`agent-<agentId>`) instead — each subagent becomes its own session.
+Keying by the field instead would make `getSessionFiles(parentId)` return the main
+log + every subagent log, and the faithful renderer would append all subagent
+transcripts after the parent's last real message. The parent's own inline `Agent`
+tool call + result (in the main file, `isSidechain: false`) correctly stay with the
+parent. Re-index existing data to re-key rows indexed before this rule.
 
 ## Harness wrapper tags
 Agents inject XML wrapper tags into the *user* turn to annotate harness activity.

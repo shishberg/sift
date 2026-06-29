@@ -24,6 +24,23 @@ function sessionIdFromPath(filePath: string): string {
   return match ? match[0] : stem.slice(-36);
 }
 
+/**
+ * Codex content arrives either as a plain string or as an array of typed blocks
+ * (`input_text` / `output_text` / `input_image` / …). Both message content and a
+ * `function_call_output`'s `output` use this shape — e.g. a `view_image` call's
+ * output is `[{ type: 'input_image', image_url: 'data:…' }]`. Pull out the
+ * natural-language text; non-text blocks (images) contribute nothing. Always
+ * returns a string, so it is safe to store.
+ */
+function blocksToText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value)) return '';
+  return (value as Record<string, unknown>[])
+    .filter((b) => b['type'] === 'input_text' || b['type'] === 'output_text')
+    .map((b) => (typeof b['text'] === 'string' ? b['text'] : ''))
+    .join('');
+}
+
 export class CodexAdapter implements Adapter {
   readonly agentType = 'codex' as const;
   readonly rootDir: string;
@@ -81,14 +98,9 @@ export class CodexAdapter implements Adapter {
       if (!role || role === 'developer') return [];
       if (role !== 'user' && role !== 'assistant') return [];
 
-      const content = payload['content'] as Record<string, unknown>[] | undefined;
-      if (!Array.isArray(content)) return [];
-
-      // Concatenate input_text / output_text blocks.
-      const joined = content
-        .filter((b) => b['type'] === 'input_text' || b['type'] === 'output_text')
-        .map((b) => b['text'] as string)
-        .join('');
+      // Concatenate input_text / output_text blocks (images and other block
+      // types contribute nothing).
+      const joined = blocksToText(payload['content']);
       // Strip codex's injected harness preamble from user turns.
       const text = role === 'user' ? stripHarnessTags(joined) : joined;
       if (!text) return [];
@@ -104,7 +116,9 @@ export class CodexAdapter implements Adapter {
     }
 
     if (payloadType === 'function_call_output') {
-      const output = (payload['output'] as string | undefined) ?? '';
+      // `output` is usually a string, but tools like view_image return an array
+      // of content blocks (image data) — normalize either shape to text.
+      const output = blocksToText(payload['output']);
       return [{ agentType, sessionId, filePath, lineNumber, role: 'tool', text: truncate(output, TOOL_RESULT_MAX), timestamp }];
     }
 

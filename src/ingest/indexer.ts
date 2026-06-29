@@ -49,27 +49,36 @@ export async function indexFile(
 
   const result = await tailFile(filePath, priorState);
 
-  // Persist updated tail state regardless of whether we got new lines.
-  // This records inode/size changes even when no complete lines arrived.
-  store.upsertSourceFile({
+  const sourceFile = {
     path: filePath,
     agentType: adapter.agentType,
     inode: result.state.inode,
     lastOffset: result.state.lastOffset,
     lastSize: result.state.lastSize,
     lastLineNumber: result.state.lastLineNumber,
-  });
+  };
 
-  if (result.lines.length === 0) return 0;
+  // No new complete lines: just record inode/size/offset movement and stop.
+  if (result.lines.length === 0) {
+    store.upsertSourceFile(sourceFile);
+    return 0;
+  }
 
-  // Parse all new lines into chunks, then insert in a single transaction.
+  // Parse first. If an adapter throws here, we fall through WITHOUT advancing the
+  // tail state, so the next pass re-reads these same lines instead of skipping them.
   const chunks = result.lines.flatMap((line) =>
     adapter.parseLine(line.text, { filePath, lineNumber: line.lineNumber }),
   );
 
-  if (chunks.length > 0) {
-    store.addChunks(chunks.map((chunk) => ({ chunk })));
-  }
+  // Insert the chunks and advance the tail state atomically: either both commit
+  // or neither does. If the chunk insert fails, the offset is not advanced, so the
+  // next pass re-reads the lines cleanly — no dropped content, no duplicates.
+  store.runTransaction(() => {
+    if (chunks.length > 0) {
+      store.addChunks(chunks.map((chunk) => ({ chunk })));
+    }
+    store.upsertSourceFile(sourceFile);
+  });
 
   // Capture the working directory once. It's recorded on a metadata line that
   // may not itself produce a chunk (codex/pi), so scan the raw lines — not just

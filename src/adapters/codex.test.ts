@@ -250,6 +250,41 @@ describe('CodexAdapter', () => {
       const chunks = adapter.parseLine(line, CTX);
       expect(chunks[0].text.length).toBeLessThanOrEqual(503);
     });
+
+    // view_image (and similar) return output as an array of content blocks, not
+    // a string. text must still be a string, or SQLite can't bind it.
+    it('normalizes an array output (image blocks) to a string, dropping images', () => {
+      const line = JSON.stringify({
+        timestamp: '2026-06-26T23:27:13.000Z',
+        type: 'response_item',
+        payload: {
+          type: 'function_call_output',
+          call_id: 'c1',
+          output: [{ type: 'input_image', image_url: 'data:image/png;base64,iVBORw0KGgo' }],
+        },
+      });
+      const chunks = adapter.parseLine(line, CTX);
+      expect(chunks).toHaveLength(1);
+      expect(typeof chunks[0].text).toBe('string');
+      expect(chunks[0].text).toBe('');
+    });
+
+    it('extracts output_text blocks from an array output', () => {
+      const line = JSON.stringify({
+        timestamp: '2026-06-26T23:27:13.000Z',
+        type: 'response_item',
+        payload: {
+          type: 'function_call_output',
+          call_id: 'c1',
+          output: [
+            { type: 'output_text', text: 'rows updated' },
+            { type: 'input_image', image_url: 'data:image/png;base64,AAAA' },
+          ],
+        },
+      });
+      const chunks = adapter.parseLine(line, CTX);
+      expect(chunks[0].text).toBe('rows updated');
+    });
   });
 
   describe('parseLine() — session id from filename', () => {

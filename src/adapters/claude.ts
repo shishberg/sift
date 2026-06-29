@@ -15,9 +15,16 @@ const INDEXED_TYPES = new Set(['user', 'assistant']);
 
 export class ClaudeAdapter implements Adapter {
   readonly agentType = 'claude' as const;
-  // Session id: prefer the `sessionId` field on the record; fall back to filename stem.
-  // The filename stem IS the session id for claude (e.g. <sessionId>.jsonl), so either
-  // path works — but we prefer the record field in case it differs.
+  // Session id, normal records: prefer the `sessionId` field; fall back to the
+  // filename stem (which IS the session id for claude, e.g. <sessionId>.jsonl).
+  //
+  // Sidechain records are different. Claude writes each subagent's transcript to
+  // <project>/<parentSessionId>/subagents/agent-<agentId>.jsonl, and every line
+  // there carries `sessionId` = the PARENT session id. That field is a
+  // cross-reference to the parent, not this transcript's own id — keying by it
+  // would fold the whole subagent log into the parent session. So for sidechain
+  // records we key by the filename stem (agent-<agentId>), giving each subagent
+  // its own session.
   readonly rootDir: string;
 
   constructor() {
@@ -54,8 +61,13 @@ export class ClaudeAdapter implements Adapter {
     if (!INDEXED_TYPES.has(type as string)) return [];
 
     const timestamp = (record['timestamp'] as string | undefined) ?? '';
-    // Session id: prefer field on record, fall back to filename stem.
-    const sessionId = (record['sessionId'] as string | undefined) ?? sessionIdFromPath(ctx.filePath);
+    // Session id: sidechain (subagent) records key by their own file's stem, since
+    // their `sessionId` field points at the parent. All other records prefer the
+    // `sessionId` field and fall back to the filename stem. See the class comment.
+    const sessionId =
+      record['isSidechain'] === true
+        ? sessionIdFromPath(ctx.filePath)
+        : ((record['sessionId'] as string | undefined) ?? sessionIdFromPath(ctx.filePath));
     const filePath = ctx.filePath;
     const lineNumber = ctx.lineNumber;
     const agentType = this.agentType;

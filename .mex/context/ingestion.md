@@ -19,7 +19,7 @@ edges:
     condition: when deciding what gets written to the vector vs FTS index
   - target: patterns/debug-indexing.md
     condition: when a session isn't being indexed correctly
-last_updated: 2026-06-28
+last_updated: 2026-06-30
 ---
 
 # Ingestion
@@ -52,6 +52,14 @@ On a change event:
    complete lines, parse, advance `last_offset`.
 3. If `size < last_offset` or `inode` changed (truncation/rotation): re-scan from 0.
 4. Hold back a trailing partial line (no newline yet) until the next write completes it.
+
+The chunk insert and the tail-state advance commit in ONE transaction
+(`indexFile` → `store.runTransaction`). Parsing happens first, outside it. If
+parsing OR the insert throws, the offset is not advanced, so the next pass
+re-reads the same lines cleanly — no dropped content, no duplicates. (Before this,
+the offset was written first, so a parse/insert error silently skipped the file's
+content forever.) When there are no new complete lines, only the tail state is
+written (to record inode/size movement).
 
 ## Parsing
 Each new line is parsed by the agent adapter for that directory into the common

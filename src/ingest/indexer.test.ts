@@ -183,6 +183,29 @@ describe('indexFile', () => {
     expect(sf!.lastLineNumber).toBe(1);
   });
 
+  it('does not advance the tail state if the chunk insert fails (atomic)', async () => {
+    const filePath = join(tmpDir, 'atomic.jsonl');
+    writeFileSync(filePath, JSON.stringify({ role: 'user', text: 'hi' }) + '\n');
+
+    // Simulate the chunk insert blowing up (e.g. a non-bindable field).
+    const spy = vi.spyOn(store, 'addChunks').mockImplementation(() => {
+      throw new Error('insert failed');
+    });
+
+    await expect(indexFile(filePath, store, fakeRegistry(tmpDir))).rejects.toThrow('insert failed');
+
+    // Tail state must NOT have advanced — otherwise the next pass would skip these
+    // lines and the content would be lost forever.
+    expect(store.getSourceFile(filePath)).toBeUndefined();
+
+    // With the insert working again, the same lines are re-read and indexed.
+    spy.mockRestore();
+    const count = await indexFile(filePath, store, fakeRegistry(tmpDir));
+    expect(count).toBe(1);
+    expect(store.getSessionChunks('test-session')).toHaveLength(1);
+    expect(store.getSourceFile(filePath)!.lastLineNumber).toBe(1);
+  });
+
   it('captures the working directory from the log onto the source file', async () => {
     const filePath = join(tmpDir, 'cwd.jsonl');
     writeFileSync(

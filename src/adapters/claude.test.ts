@@ -178,6 +178,32 @@ describe('ClaudeAdapter', () => {
     });
   });
 
+  describe('parseLine() — sidechain (subagent) records', () => {
+    // Subagent transcripts live at <parentSessionId>/subagents/agent-<id>.jsonl
+    // and every line carries the PARENT's sessionId. We must NOT key by it, or
+    // the whole subagent log folds into the parent session.
+    const PARENT_SESSION_ID = '389340f5-2a95-4f1d-88f3-1ee2a21ca022';
+    const SUBAGENT_FILE = `/Users/agent/.claude/projects/-Users-agent-src-MezzaNexus/${PARENT_SESSION_ID}/subagents/agent-a00899dbce2940f78.jsonl`;
+    const SIDECHAIN_LINE = JSON.stringify({
+      type: 'user',
+      isSidechain: true,
+      agentId: 'a00899dbce2940f78',
+      message: { role: 'user', content: [{ type: 'text', text: 'Review a single document.' }] },
+      timestamp: '2026-06-28T14:05:12.054Z',
+      sessionId: PARENT_SESSION_ID,
+    });
+
+    it('keys by the subagent file stem, not the parent sessionId field', () => {
+      const chunks = adapter.parseLine(SIDECHAIN_LINE, {
+        filePath: SUBAGENT_FILE,
+        lineNumber: 1,
+      });
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0].sessionId).toBe('agent-a00899dbce2940f78');
+      expect(chunks[0].sessionId).not.toBe(PARENT_SESSION_ID);
+    });
+  });
+
   describe('parseLine() — user text (string content)', () => {
     it('produces one chunk with role user and the string as text', () => {
       const chunks = adapter.parseLine(USER_TEXT_STRING_LINE, CTX);

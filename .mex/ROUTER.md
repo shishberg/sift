@@ -20,7 +20,7 @@ edges:
     condition: when working on querying, ranking, or how results are returned
   - target: context/agent-adapters.md
     condition: when adding an agent or touching agent-specific parsing
-last_updated: 2026-06-28
+last_updated: 2026-06-30
 web_layout_updated: 2026-06-28
 ---
 
@@ -32,19 +32,26 @@ Then read this file fully before doing anything else in this session.
 
 ## Current Project State
 
-**V1 is built and working.** Implemented via TDD, on `main`, 387 tests passing.
+**V1 is built and working.** Implemented via TDD, on `main`, 429 tests passing.
 See `context/impl-spec.md` for the concrete build and `context/decisions.md` for the why.
 
 **Working (all verified end-to-end against real logs, ~35k chunks):**
 - chokidar watcher over the agent session dirs (dirs derived from adapter `rootDir`s)
-- Agent adapters: claude, codex, pi (JSONL) + an opencode SQLite **source**
+- Agent adapters: claude, codex, pi (JSONL) + an opencode SQLite **source**.
+  claude subagent transcripts (`<parentSessionId>/subagents/agent-*.jsonl`) are
+  keyed as their OWN sessions by filename stem, not the parent `sessionId` field
+  they embed (see `context/agent-adapters.md`).
 - Byte-offset JSONL tail + `source_files` (offset/inode/line-number) tracking
 - SQLite index: sqlite-vec (768-dim) + FTS5, WAL mode, BigInt vec rowids
 - Persistent embedding queue (`needs_embed`) drained by a single-flight consumer;
   backfill = the watcher's startup scan (not a separate op)
 - Local embedder: ollama `nomic-embed-text`, with task prefixes + a model/dims guard
 - Hybrid search: vec + FTS5 merged with RRF (k=60); FTS queries sanitized for punctuation
-- CLI: search, show, index, watch, status, serve (+ live progress bar). Search
+- CLI: search, show, index, watch, status, serve (+ live progress bar). Each
+  subcommand has its own `--help` (`sift show --help` etc.) via `SUBCOMMAND_HELP`
+  / `helpText(topic)`. `show` takes a line range to narrow output —
+  `show <id>:220`, `show <id>:210-230`, or `--lines`/`-l RANGE` (matching the
+  `id:line` locators search prints; filters chunks by `lineNumber`). Search
   is scoped to the current directory by default; `--all` searches everywhere,
   `--cwd PATH` scopes elsewhere (cwd-filtered vec/FTS variants in the store via
   `rowid IN`; sqlite-vec filters before KNN). Web `/api/search` stays unscoped.
