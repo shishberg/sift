@@ -32,7 +32,7 @@ sift — search across Claude, Codex, and pi agent session transcripts.
 
 USAGE
   sift <query> [--limit N] [--format text|json] [--cwd PATH | --all]
-  sift show <sessionId> [--tools]
+  sift show <sessionId>[:LINE | :START-END] [--lines RANGE] [--tools]
   sift index
   sift watch
   sift status
@@ -53,6 +53,12 @@ COMMANDS
   show <sessionId>
       Print the full transcript for a session. User and assistant messages
       are shown by default; tool calls are hidden unless you pass --tools.
+
+      Restrict output to a range of source-log line numbers (the same id:line
+      locators search prints) in any of these forms:
+        sift show <id>:220              ← only line 220
+        sift show <id>:210-230          ← lines 210–230
+        sift show --lines 210-230 <id>  ← same, as a flag (-l for short)
 
       Workflow: go from a search result to its transcript:
         1. sift <query>         ← find matching chunks
@@ -84,6 +90,9 @@ OPTIONS
   --cwd PATH    Scope the search to sessions that ran in PATH (default: the
                 current directory). Accepts ~, relative, or absolute paths.
   --all         Search every indexed session, ignoring the working directory.
+  -l, --lines RANGE
+                Show only line RANGE of the transcript (show command): a single
+                line (220) or a span (210-230). Same as the <id>:RANGE suffix.
   --tools       Include tool call chunks in transcript output (show command).
   --port N      Port for the serve command (default: ${DEFAULT_PORT}).
   --watch       Start watcher + embed worker alongside the server (serve only).
@@ -94,6 +103,101 @@ EMBEDDING
   Ensure ollama is running before indexing or searching:
     ollama serve
 `.trim();
+
+// ---------------------------------------------------------------------------
+// Per-subcommand help (shown by `sift <command> --help`)
+// ---------------------------------------------------------------------------
+
+const SUBCOMMAND_HELP: Record<string, string> = {
+  show: `
+sift show — print a session transcript.
+
+USAGE
+  sift show <sessionId>[:LINE | :START-END] [--lines RANGE] [--tools]
+
+DESCRIPTION
+  Print the full transcript for a session. User and assistant messages are
+  shown by default; tool calls are hidden unless you pass --tools.
+
+  Restrict output to a range of source-log line numbers (the same id:line
+  locators search prints) in any of these forms:
+    sift show <id>:220              only line 220
+    sift show <id>:210-230          lines 210–230
+    sift show --lines 210-230 <id>  same, as a flag (-l for short)
+
+OPTIONS
+  -l, --lines RANGE   Show only line RANGE: a single line (220) or a span
+                      (210-230). Same as the <id>:RANGE suffix.
+  --tools             Include tool call chunks in the output.
+  -h, --help          Show this help.
+`.trim(),
+
+  index: `
+sift index — one-shot index of all agent logs.
+
+USAGE
+  sift index
+
+DESCRIPTION
+  Scan every agent log file, index it, and drain the embedding queue to
+  completion, then exit. Shows a live progress bar. Embeddings are generated
+  locally via ollama — make sure it is running (ollama serve).
+
+OPTIONS
+  -h, --help   Show this help.
+`.trim(),
+
+  watch: `
+sift watch — index agent logs continuously.
+
+USAGE
+  sift watch
+
+DESCRIPTION
+  Watch the agent log directories and keep indexing new and changed files,
+  draining the embedding queue as it goes. Shows a live progress bar.
+  Ctrl-C to stop. Make sure ollama is running (ollama serve).
+
+OPTIONS
+  -h, --help   Show this help.
+`.trim(),
+
+  status: `
+sift status — print embedding queue stats.
+
+USAGE
+  sift status
+
+DESCRIPTION
+  Print current embedding queue stats (total / embedded / pending) and a
+  text progress bar, then exit.
+
+OPTIONS
+  -h, --help   Show this help.
+`.trim(),
+
+  serve: `
+sift serve — start the HTTP API + web app.
+
+USAGE
+  sift serve [--port N] [--watch]
+
+DESCRIPTION
+  Start the HTTP API server and serve the web app from web/dist. Exposes
+  /api/search, /api/session/:id, and /api/status.
+
+OPTIONS
+  --port N     Port to listen on (default: ${DEFAULT_PORT}, or AGENT_SEARCH_PORT).
+  --watch      Also start the file watcher + embed worker so the web app
+               shows live indexing progress.
+  -h, --help   Show this help.
+`.trim(),
+};
+
+/** Help text for a topic, falling back to the top-level help. */
+export function helpText(topic?: string): string {
+  return (topic && SUBCOMMAND_HELP[topic]) || HELP_TEXT;
+}
 
 // ---------------------------------------------------------------------------
 // Progress bar (pure — safe to unit-test)
@@ -329,23 +433,41 @@ export async function cmdSearch(
  * @param sessionId  Session id from a search result.
  * @param deps.getSessionChunks  Returns chunks for a session id.
  * @param opts.showTools         Include tool chunks (default: false).
+ * @param opts.lines             Restrict to chunks whose line number falls in
+ *                               this inclusive range (default: all lines).
  * @param opts.write             Output writer.
  */
 export function cmdShow(
   sessionId: string,
   deps: { getSessionChunks: (id: string) => Chunk[] },
-  opts: { showTools?: boolean; color?: boolean; write: (s: string) => void },
+  opts: {
+    showTools?: boolean;
+    lines?: { start: number; end: number };
+    color?: boolean;
+    write: (s: string) => void;
+  },
 ): void {
-  const { write } = opts;
+  const { write, lines } = opts;
   const showTools = opts.showTools ?? false;
   const color = opts.color ?? false;
   const paint = (s: string, code: string): string =>
     color ? `${code}${s}${ANSI.reset}` : s;
 
-  const chunks = deps.getSessionChunks(sessionId);
+  const allChunks = deps.getSessionChunks(sessionId);
 
-  if (chunks.length === 0) {
+  if (allChunks.length === 0) {
     write(`No chunks found for session: ${sessionId}`);
+    return;
+  }
+
+  // Narrow to the requested line range, if any (line numbers are 1-based).
+  const chunks = lines
+    ? allChunks.filter((c) => c.lineNumber >= lines.start && c.lineNumber <= lines.end)
+    : allChunks;
+
+  if (lines && chunks.length === 0) {
+    const span = lines.start === lines.end ? `line ${lines.start}` : `lines ${lines.start}-${lines.end}`;
+    write(`No chunks found at ${span} for session: ${sessionId}`);
     return;
   }
 
@@ -538,6 +660,13 @@ export interface ParsedCli {
   command: 'search' | 'show' | 'index' | 'watch' | 'status' | 'serve' | 'help';
   query?: string;
   sessionId?: string;
+  /** Help topic (show/index/…) when command === 'help'. Undefined → top-level help. */
+  helpTopic?: string;
+  /**
+   * Line range for `show` (1-based, inclusive). A single line is start === end.
+   * `{ start: NaN, end: NaN }` signals a malformed range for main() to reject.
+   */
+  lines?: { start: number; end: number };
   limit?: number;
   /** Raw --format value, validated by main() ('text' | 'json'). */
   format?: string;
@@ -551,26 +680,79 @@ export interface ParsedCli {
 }
 
 /**
+ * Parse a line-range string for `show`: `"220"` → a single line, `"210-230"`
+ * → a span. Returns undefined for undefined input (no range requested), or
+ * `{ start: NaN, end: NaN }` for anything malformed (so main() can reject it).
+ */
+export function parseLineRange(input: string | undefined): { start: number; end: number } | undefined {
+  if (input === undefined) return undefined;
+  const m = input.match(/^(\d+)(?:-(\d+))?$/);
+  if (!m) return { start: NaN, end: NaN };
+  const start = parseInt(m[1]!, 10);
+  const end = m[2] !== undefined ? parseInt(m[2]!, 10) : start;
+  if (start < 1 || end < start) return { start: NaN, end: NaN };
+  return { start, end };
+}
+
+/**
  * Parse CLI argv (pass `process.argv.slice(2)` in production).
  * Pure: no side effects, easy to unit-test.
  */
 export function parseCli(argv: string[]): ParsedCli {
-  // No args or explicit help flags → show help.
-  if (
-    argv.length === 0 ||
-    argv.includes('--help') ||
-    argv.includes('-h')
-  ) {
-    return { command: 'help' };
-  }
+  // No args → top-level help.
+  if (argv.length === 0) return { command: 'help' };
 
   const [first, ...rest] = argv;
+  const subcommands = new Set(['show', 'index', 'watch', 'status', 'serve']);
+
+  // Subcommand-specific help: `sift show --help` shows show's help, not the
+  // top-level help. Must run before the generic --help handling below.
+  if (subcommands.has(first!) && (rest.includes('--help') || rest.includes('-h'))) {
+    return { command: 'help', helpTopic: first };
+  }
 
   // Named subcommands.
   if (first === 'show') {
-    const sessionId = rest.find((a) => !a.startsWith('-'));
     const showTools = rest.includes('--tools');
-    return { command: 'show', sessionId, showTools };
+
+    // Find an explicit --lines / -l flag and the value after it.
+    let linesIdx = -1;
+    for (let i = 0; i < rest.length; i++) {
+      if (rest[i] === '--lines' || rest[i] === '-l') {
+        linesIdx = i;
+        break;
+      }
+    }
+    let flagInput: string | undefined;
+    if (linesIdx !== -1) {
+      const value = rest[linesIdx + 1];
+      // Bare flag (no value, or another flag follows) → '' so parseLineRange
+      // reports it as malformed rather than silently ignoring it.
+      flagInput = value !== undefined && !value.startsWith('-') ? value : '';
+    }
+
+    // Session id: first non-flag token that isn't the --lines value.
+    let sessionToken: string | undefined;
+    for (let i = 0; i < rest.length; i++) {
+      if (linesIdx !== -1 && (i === linesIdx || i === linesIdx + 1)) continue;
+      if (rest[i]!.startsWith('-')) continue;
+      sessionToken = rest[i];
+      break;
+    }
+
+    // Split an `id:LINE` / `id:START-END` suffix off the session token. Session
+    // ids are UUID-shaped (no colons), so the last colon is the separator.
+    let sessionId = sessionToken;
+    let suffixInput: string | undefined;
+    if (sessionToken && sessionToken.includes(':')) {
+      const idx = sessionToken.lastIndexOf(':');
+      sessionId = sessionToken.slice(0, idx);
+      suffixInput = sessionToken.slice(idx + 1);
+    }
+
+    // An explicit --lines flag wins over the id suffix.
+    const lines = parseLineRange(linesIdx !== -1 ? flagInput : suffixInput);
+    return { command: 'show', sessionId, showTools, lines };
   }
   if (first === 'index') return { command: 'index' };
   if (first === 'watch') return { command: 'watch' };
@@ -590,6 +772,11 @@ export function parseCli(argv: string[]): ParsedCli {
     }
     const watch = rest.includes('--watch');
     return { command: 'serve', port, watch };
+  }
+
+  // No subcommand matched: a bare --help / -h anywhere means top-level help.
+  if (argv.includes('--help') || argv.includes('-h')) {
+    return { command: 'help' };
   }
 
   // Default: everything that isn't a known flag becomes the search query.
@@ -713,7 +900,7 @@ async function main(): Promise<void> {
   const parsed = parseCli(argv);
 
   if (parsed.command === 'help') {
-    console.log(HELP_TEXT);
+    console.log(helpText(parsed.helpTopic));
     return;
   }
 
@@ -810,7 +997,12 @@ async function main(): Promise<void> {
   // ---- show ----
   if (parsed.command === 'show') {
     if (!parsed.sessionId) {
-      console.error('Usage: sift show <sessionId> [--tools]');
+      console.error('Usage: sift show <sessionId>[:LINE|:START-END] [--lines RANGE] [--tools]');
+      process.exit(1);
+    }
+
+    if (parsed.lines && (Number.isNaN(parsed.lines.start) || Number.isNaN(parsed.lines.end))) {
+      console.error('--lines must be a line number or range (e.g. --lines 220 or --lines 210-230)');
       process.exit(1);
     }
 
@@ -820,7 +1012,7 @@ async function main(): Promise<void> {
       cmdShow(
         parsed.sessionId,
         { getSessionChunks: (id) => store.getSessionChunks(id) },
-        { showTools: parsed.showTools, color, write: (s) => console.log(s) },
+        { showTools: parsed.showTools, lines: parsed.lines, color, write: (s) => console.log(s) },
       );
     } finally {
       store.close();

@@ -18,7 +18,7 @@ edges:
     condition: when working with sqlite-vec or FTS5 specifics
   - target: patterns/add-cli-command.md
     condition: when exposing search through a CLI command
-last_updated: 2026-06-28
+last_updated: 2026-06-30
 ---
 
 # Search
@@ -76,8 +76,13 @@ can't trace back to a session is a bug.
   TTY (agent colour-coded; honours `NO_COLOR`); piped/non-TTY output stays plain.
   `--format json` dumps the raw `SearchResult[]` (full ISO timestamps, absolute
   cwd) for machine use. `show` uses the same role colouring and a blank line
-  between messages. `--help` must explain how to read a transcript from an id
-  (messages only by default). Search is scoped to the current directory by
+  between messages. `show` accepts a line range to narrow output, matching the
+  `id:line` locators search prints: `show <id>:220` (single line),
+  `show <id>:210-230` (range), or `show --lines 210-230 <id>` / `-l` (flag form,
+  wins over an id suffix). Range filters chunks by `lineNumber` (inclusive);
+  `--tools` still gates tool chunks. `--help` must explain how to read a
+  transcript from an id (messages only by default); each subcommand has its own
+  `--help` (e.g. `show --help`) via `helpText(topic)`. Search is scoped to the current directory by
   default (`--all` / `--cwd PATH` to change); text mode prints the active scope
   to stderr. See `patterns/add-cli-command.md`.
 - **Web (Vue/Vite/shadcn-vue):** list of matching sessions, each with the matching

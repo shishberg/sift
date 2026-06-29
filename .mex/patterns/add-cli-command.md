@@ -12,7 +12,7 @@ edges:
     condition: when the command searches or reads sessions
   - target: context/conventions.md
     condition: to check the read-only and result-locator rules
-last_updated: 2026-06-28
+last_updated: 2026-06-30
 ---
 
 # Add a CLI Command
@@ -35,7 +35,10 @@ wiring layer. Follow that shape for new commands.
    no query syntax (see `context/decisions.md`).
 2. Write clear `--help` in `HELP_TEXT`: what it does, args, and crucially how an
    agent uses the output (e.g. take a session id from a search result, then read
-   its transcript, messages-only by default).
+   its transcript, messages-only by default). Also add a focused per-subcommand
+   block to `SUBCOMMAND_HELP` so `sift <cmd> --help` shows command-specific help
+   (`parseCli` returns `{ command: 'help', helpTopic }` when a known subcommand is
+   followed by `--help`/`-h`; `main()` prints `helpText(topic)`).
 3. Print results so each carries its session id (+ file path / line number).
 4. Output format (decided): human-readable text by default; offer `--format json`
    for machine use where it helps (search has both). Validate bad flag values in
@@ -57,7 +60,12 @@ wiring layer. Follow that shape for new commands.
 ## Gotchas
 - Every result must include the session id — that's how an agent gets back to the log.
 - Don't add a write/resume command — read-only only.
-- Keep `--help` (`HELP_TEXT`) in sync when flags change.
+- Keep `--help` in sync when flags change — both `HELP_TEXT` and the matching
+  `SUBCOMMAND_HELP` entry.
+- Subcommand `--help` must be checked before the generic top-level `--help`
+  handling in `parseCli`, or `sift show --help` falls through to top-level help.
+- When a flag takes a value (e.g. `--lines RANGE`), skip that value when scanning
+  for positional args, or it gets misread as the session id / query.
 - Strip flags out of the joined query string so they don't leak into the search
   (see the value-flag loop in `parseCli`).
 

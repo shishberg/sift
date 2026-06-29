@@ -8,6 +8,7 @@ import {
   cmdStatus,
   cmdIndex,
   HELP_TEXT,
+  helpText,
   parseCli,
   homeRelative,
   resolveCwd,
@@ -505,6 +506,83 @@ describe('cmdShow', () => {
     );
     expect(lines.join('\n')).toContain('\n\n');
   });
+
+  it('restricts output to a single requested line', () => {
+    const lines: string[] = [];
+    cmdShow(
+      'sess1',
+      {
+        getSessionChunks: () => [
+          makeChunk({ role: 'user', text: 'line ten', lineNumber: 10, filePath: '/f.jsonl' }),
+          makeChunk({ role: 'assistant', text: 'line twenty', lineNumber: 20, filePath: '/f.jsonl' }),
+        ],
+      },
+      { lines: { start: 20, end: 20 }, write: (s) => lines.push(s) },
+    );
+    const output = lines.join('\n');
+    expect(output).toContain('line twenty');
+    expect(output).not.toContain('line ten');
+  });
+
+  it('restricts output to a requested line range (inclusive)', () => {
+    const lines: string[] = [];
+    cmdShow(
+      'sess1',
+      {
+        getSessionChunks: () => [
+          makeChunk({ role: 'user', text: 'before', lineNumber: 5, filePath: '/f.jsonl' }),
+          makeChunk({ role: 'user', text: 'start edge', lineNumber: 10, filePath: '/f.jsonl' }),
+          makeChunk({ role: 'user', text: 'inside', lineNumber: 15, filePath: '/f.jsonl' }),
+          makeChunk({ role: 'user', text: 'end edge', lineNumber: 20, filePath: '/f.jsonl' }),
+          makeChunk({ role: 'user', text: 'after', lineNumber: 25, filePath: '/f.jsonl' }),
+        ],
+      },
+      { lines: { start: 10, end: 20 }, write: (s) => lines.push(s) },
+    );
+    const output = lines.join('\n');
+    expect(output).toContain('start edge');
+    expect(output).toContain('inside');
+    expect(output).toContain('end edge');
+    expect(output).not.toContain('before');
+    expect(output).not.toContain('after');
+  });
+
+  it('reports when no chunk falls in the requested range', () => {
+    const lines: string[] = [];
+    cmdShow(
+      'sess1',
+      {
+        getSessionChunks: () => [
+          makeChunk({ role: 'user', text: 'line five', lineNumber: 5, filePath: '/f.jsonl' }),
+        ],
+      },
+      { lines: { start: 100, end: 200 }, write: (s) => lines.push(s) },
+    );
+    const output = lines.join('\n');
+    expect(output).toMatch(/no chunks found at lines 100-200/i);
+    expect(output).not.toContain('line five');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// helpText
+// ---------------------------------------------------------------------------
+
+describe('helpText', () => {
+  it('returns the top-level help when no topic is given', () => {
+    expect(helpText()).toBe(HELP_TEXT);
+  });
+
+  it('returns show-specific help for the show topic', () => {
+    const text = helpText('show');
+    expect(text).not.toBe(HELP_TEXT);
+    expect(text).toMatch(/sift show/);
+    expect(text).toMatch(/--lines/);
+  });
+
+  it('falls back to top-level help for an unknown topic', () => {
+    expect(helpText('bogus')).toBe(HELP_TEXT);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -678,6 +756,69 @@ describe('parseCli', () => {
   it('show without --tools defaults showTools to false', () => {
     const args = parseCli(['show', 'sess-123']);
     expect(args.showTools).toBe(false);
+  });
+
+  it('show without a line range leaves lines undefined', () => {
+    const args = parseCli(['show', 'sess-123']);
+    expect(args.lines).toBeUndefined();
+  });
+
+  it('parses a single line from an id:line locator', () => {
+    const args = parseCli(['show', '2e79d433-10a4-41bc-a3b4-0bc313ca2d26:220']);
+    expect(args.command).toBe('show');
+    expect(args.sessionId).toBe('2e79d433-10a4-41bc-a3b4-0bc313ca2d26');
+    expect(args.lines).toEqual({ start: 220, end: 220 });
+  });
+
+  it('parses a line range from an id:start-end locator', () => {
+    const args = parseCli(['show', 'sess-123:210-230']);
+    expect(args.sessionId).toBe('sess-123');
+    expect(args.lines).toEqual({ start: 210, end: 230 });
+  });
+
+  it('parses --lines with a range, leaving the session id clean', () => {
+    const args = parseCli(['show', '--lines', '210-230', 'sess-123']);
+    expect(args.sessionId).toBe('sess-123');
+    expect(args.lines).toEqual({ start: 210, end: 230 });
+  });
+
+  it('accepts -l as shorthand for --lines', () => {
+    const args = parseCli(['show', '-l', '210-230', 'sess-123']);
+    expect(args.sessionId).toBe('sess-123');
+    expect(args.lines).toEqual({ start: 210, end: 230 });
+  });
+
+  it('lets an explicit --lines flag override the id suffix', () => {
+    const args = parseCli(['show', 'sess-123:5', '--lines', '210-230']);
+    expect(args.sessionId).toBe('sess-123');
+    expect(args.lines).toEqual({ start: 210, end: 230 });
+  });
+
+  it('marks a malformed line range as NaN', () => {
+    const args = parseCli(['show', 'sess-123:nope']);
+    expect(args.lines).toEqual({ start: NaN, end: NaN });
+  });
+
+  it('marks a reversed line range as NaN', () => {
+    const args = parseCli(['show', 'sess-123:230-210']);
+    expect(args.lines?.start).toBeNaN();
+  });
+
+  it('marks a bare --lines flag as NaN', () => {
+    const args = parseCli(['show', 'sess-123', '--lines']);
+    expect(args.lines?.start).toBeNaN();
+  });
+
+  it('returns show help for `show --help`', () => {
+    const args = parseCli(['show', '--help']);
+    expect(args.command).toBe('help');
+    expect(args.helpTopic).toBe('show');
+  });
+
+  it('returns serve help for `serve -h`', () => {
+    const args = parseCli(['serve', '-h']);
+    expect(args.command).toBe('help');
+    expect(args.helpTopic).toBe('serve');
   });
 
   it('parses index command', () => {
