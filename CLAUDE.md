@@ -1,7 +1,7 @@
 ---
 name: agents
 description: Always-loaded project anchor. Read this first. Contains project identity, non-negotiables, commands, and pointer to ROUTER.md for full context.
-last_updated: 2026-06-28
+last_updated: 2026-06-30
 ---
 
 # sift
@@ -29,6 +29,12 @@ After meaningful work, run GROW:
 - Record: update `.mex/ROUTER.md` and relevant `.mex/context/` files
 - Orient: create or update a `.mex/patterns/` runbook if this can recur
 - Write: bump `last_updated` on changed scaffold files and run `mex log` when rationale matters
+
+## Always Commit After a Change
+Once a change is complete and tests pass, commit it — don't leave finished work
+uncommitted. Stage only the files you touched (`git add <path> …`), never
+`git add -A`/`.`: this tree is often shared with another agent, and a blanket add
+would sweep up their in-progress work. Commit to `main`; don't push unless asked.
 
 ## Navigation
 At the start of every session, read `.mex/ROUTER.md` before doing anything else.
