@@ -13,7 +13,7 @@ edges:
     condition: when a convention depends on understanding the system structure
   - target: context/agent-adapters.md
     condition: when writing per-agent code — it must stay behind the adapter interface
-last_updated: 2026-06-28
+last_updated: 2026-06-30
 ---
 
 # Conventions
@@ -48,6 +48,12 @@ session logs. They are the source of truth.
 
 **Plain string queries.** No filter/query syntax in V1. Take a string, search
 both indexes, sort. Don't add query operators without an explicit decision.
+
+**Safe-by-default for a public repo.** This repo is public, so committed
+defaults must be safe and free of personal values (hostnames, paths). The web
+dev server (`web/vite.config.ts`) defaults to `localhost` with no
+`allowedHosts` override; LAN exposure is opt-in via `VITE_HOST` /
+`VITE_ALLOWED_HOSTS`. Never hardcode a personal host into config.
 
 ## Verify Checklist
 Before presenting any code:

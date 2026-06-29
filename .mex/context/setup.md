@@ -13,7 +13,7 @@ edges:
     condition: when specific technology versions or library details are needed
   - target: context/ingestion.md
     condition: when configuring which session directories get watched
-last_updated: 2026-06-28
+last_updated: 2026-06-30
 ---
 
 # Setup
@@ -42,11 +42,15 @@ last_updated: 2026-06-28
   `~` is expanded. opencode is read separately from its SQLite DB.
 - `AGENT_SEARCH_PORT` — port for `serve` (default 3737; `--port` also works).
 - `NO_COLOR` — disables ANSI colour in CLI search output.
+- `VITE_HOST` — web dev server bind host (default `localhost`). Set `0.0.0.0`
+  for LAN access.
+- `VITE_ALLOWED_HOSTS` — comma-separated hostnames the dev server accepts
+  (default unset = localhost only). Required alongside `VITE_HOST=0.0.0.0`.
 Do not commit actual values.
 
 ## Common Commands
 - Index / watch: `sift index`, `sift watch`, `sift status`
-- Search / read: `sift <query> [--limit N] [--format json] [--cwd PATH | --all]`, `sift show <id> [--tools]`
+- Search / read: `sift <query> [--limit N] [--format json] [--cwd PATH | --all]`, `sift show <id>[:LINE|:A-B] [--lines RANGE] [--tools]`
   (search defaults to the current directory's sessions; `--all` searches everywhere, `--cwd PATH` scopes elsewhere)
 - Web app: `sift serve [--port N] [--watch]`; dev frontend `npm run web:dev`, build `npm run web:build`
 - Tests / types: `npm test` (vitest), `npm run test:watch`, `npm run typecheck`
