@@ -3,6 +3,8 @@ dist/
 *.db
 .sift/
 coverage/
+# fastembed downloads ONNX models here on first use
+local_cache/
 web/node_modules/
 web/dist/
 

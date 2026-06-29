@@ -22,6 +22,7 @@ edges:
     condition: when adding an agent or touching agent-specific parsing
 last_updated: 2026-06-30
 web_layout_updated: 2026-06-28
+embed_providers_updated: 2026-06-30
 ---
 
 # Session Bootstrap
@@ -45,7 +46,9 @@ See `context/impl-spec.md` for the concrete build and `context/decisions.md` for
 - SQLite index: sqlite-vec (768-dim) + FTS5, WAL mode, BigInt vec rowids
 - Persistent embedding queue (`needs_embed`) drained by a single-flight consumer;
   backfill = the watcher's startup scan (not a separate op)
-- Local embedder: ollama `nomic-embed-text`, with task prefixes + a model/dims guard
+- Local embedder: ollama `nomic-embed-text` (default) OR in-process fastembed
+  `bge-base-en-v1.5`, picked by `createEmbedder()` via `AGENT_SEARCH_EMBED_PROVIDER`;
+  both local, both 768-dim, behind a model/dims guard (switching = reindex)
 - Hybrid search: vec + FTS5 merged with RRF (k=60); FTS queries sanitized for punctuation
 - CLI: search, show, index, watch, status, serve (+ live progress bar). Each
   subcommand has its own `--help` (`sift show --help` etc.) via `SUBCOMMAND_HELP`

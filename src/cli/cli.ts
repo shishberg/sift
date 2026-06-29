@@ -14,7 +14,7 @@ import { homedir } from 'node:os';
 import { readTranscript } from '../render/transcript.js';
 import type { Chunk } from '../types.js';
 import { Store } from '../index/store.js';
-import { OllamaEmbedder } from '../embed/ollama.js';
+import { createEmbedder } from '../embed/factory.js';
 import { assertEmbedModel } from '../embed/guard.js';
 import { buildRegistry } from '../adapters/registry.js';
 import { EmbedWorker, backfillCwd } from '../ingest/indexer.js';
@@ -99,9 +99,13 @@ OPTIONS
   -h, --help    Show this help.
 
 EMBEDDING
-  Embeddings are generated locally via ollama (nomic-embed-text, 768 dims).
-  Ensure ollama is running before indexing or searching:
-    ollama serve
+  Embeddings are generated LOCALLY (never a cloud API). Two providers, chosen
+  via AGENT_SEARCH_EMBED_PROVIDER:
+    ollama    (default) nomic-embed-text, 768 dims. Needs a running ollama:
+                ollama serve
+    fastembed in-process ONNX (bge-base-en-v1.5, 768 dims), no service. Needs
+              the optional package once: npm install fastembed
+  Switching provider changes the model, so reindex from scratch after changing.
 `.trim();
 
 // ---------------------------------------------------------------------------
@@ -943,7 +947,7 @@ async function main(): Promise<void> {
     }
 
     const store = new Store();
-    const embedder = new OllamaEmbedder();
+    const embedder = createEmbedder();
 
     // Guard: if the index was built with a different model, the query embeddings
     // would be in a different space than the stored vectors — results would be garbage.
@@ -1037,7 +1041,7 @@ async function main(): Promise<void> {
   // ---- index ----
   if (parsed.command === 'index') {
     const store = new Store();
-    const embedder = new OllamaEmbedder();
+    const embedder = createEmbedder();
     const registry = buildRegistry();
     const embedWorker = new EmbedWorker(store, embedder, { backoffMs: 1000 });
     const watcher = new Watcher(store, registry, embedWorker, {
@@ -1085,7 +1089,7 @@ async function main(): Promise<void> {
     }
 
     const store = new Store();
-    const embedder = new OllamaEmbedder();
+    const embedder = createEmbedder();
 
     // Guard: the embed model must match the index (needed for both search queries
     // and, with --watch, for new embeddings).
@@ -1180,7 +1184,7 @@ async function main(): Promise<void> {
   // ---- watch ----
   if (parsed.command === 'watch') {
     const store = new Store();
-    const embedder = new OllamaEmbedder();
+    const embedder = createEmbedder();
     const registry = buildRegistry();
     const embedWorker = new EmbedWorker(store, embedder, { backoffMs: 1000 });
     const watcher = new Watcher(store, registry, embedWorker);

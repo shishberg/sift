@@ -14,7 +14,7 @@ edges:
     condition: when understanding how to use a technology in this codebase
   - target: context/search.md
     condition: when working with sqlite-vec or FTS5
-last_updated: 2026-06-28
+last_updated: 2026-06-30
 ---
 
 # Stack
@@ -31,7 +31,8 @@ last_updated: 2026-06-28
 - **chokidar** — cross-platform directory watcher for detecting new session writes. Chosen over agent hooks for V1 (agent-agnostic, handles existing files + new writes uniformly). See `context/decisions.md`.
 - *shadcn-vue* — UI components for the web app.
 - *markdown-it* — renders user/assistant message text as markdown in the web session view (`web/src/lib/markdown.ts`). Configured with `html: false`, so the output is safe to render with `v-html`.
-- *ollama* — local embedding runtime (default). Model: *nomic-embed-text* (768 dims). Uses Metal GPU on Apple Silicon. Runs as a separate local service. Never a cloud embedding API. The embedder is behind an interface so an in-process option (e.g. fastembed) can be swapped in later.
+- *ollama* — local embedding runtime (default). Model: *nomic-embed-text* (768 dims). Uses Metal GPU on Apple Silicon. Runs as a separate local service. Never a cloud embedding API.
+- *fastembed* — alternative local embedder (`optionalDependencies`), in-process ONNX via onnxruntime-node — no separate service. Model: *bge-base-en-v1.5* (768 dims, matches the fixed sqlite-vec schema). Selected with `AGENT_SEARCH_EMBED_PROVIDER=fastembed`. `createEmbedder()` (`src/embed/factory.ts`) is the only place that picks a provider; everything else depends on the `Embedder` interface. The package is dynamic-`import()`ed and given an actionable "npm install fastembed" error if missing. fastembed's `passageEmbed`/`queryEmbed` apply the model's retrieval prefixes, so the fastembed embedder does NOT add the nomic `search_document:`/`search_query:` prefixes the ollama one does.
 - **better-sqlite3** — SQLite driver. Synchronous, fast; loads the sqlite-vec extension via the `sqlite-vec` package's `load(db)` helper. FTS5 is built into SQLite. Chosen over node:sqlite (experimental) and node-sqlite3 (superseded).
 
 ## What We Deliberately Do NOT Use
