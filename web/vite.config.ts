@@ -11,9 +11,9 @@ export default defineConfig({
     },
   },
   server: {
-    host: '0.0.0.0',
+    host: process.env.VITE_HOST ?? 'localhost',
     port: 3738,
-    allowedHosts: ['kodama.local'],
+    allowedHosts: process.env.VITE_ALLOWED_HOSTS?.split(','),
     proxy: {
       '/api': {
         target: 'http://localhost:3737',
