@@ -70,6 +70,14 @@ function envTruthy(v: string | undefined): boolean {
   return v !== undefined && v !== '' && v !== '0' && v.toLowerCase() !== 'false';
 }
 
+/** True when a WebGPU runtime is present (navigator.gpu exposed). */
+function hasWebGpu(): boolean {
+  return (
+    typeof navigator !== 'undefined' &&
+    (navigator as { gpu?: unknown }).gpu !== undefined
+  );
+}
+
 export class TransformersEmbedder implements Embedder {
   readonly model: string;
   readonly dims: number;
@@ -141,25 +149,28 @@ export class TransformersEmbedder implements Embedder {
           mod.env.cacheDir = this.cacheDir;
         }
 
-        // WebGPU needs a browser-like environment; warn (once) when Node will
-        // fall back so a "slow" run isn't a mystery.
-        if (
-          this.device === 'webgpu' &&
-          !this.warnedFallback &&
-          (typeof navigator === 'undefined' ||
-            (navigator as { gpu?: unknown }).gpu === undefined)
-        ) {
-          this.warnedFallback = true;
-          console.error(
-            'TransformersEmbedder: device "webgpu" requested but no WebGPU runtime ' +
-              '(navigator.gpu) is available — transformers.js will fall back to CPU. ' +
-              'Set AGENT_SEARCH_TRANSFORMERS_DEVICE=cpu to silence this, or run under a ' +
-              'WebGPU-capable runtime (browser/Electron) for GPU acceleration.',
-          );
+        // WebGPU needs a runtime that exposes navigator.gpu (browser, Electron,
+        // Deno/Bun, or Node with a WebGPU polyfill). Stock Node has none — and
+        // passing device:"webgpu" to onnxruntime there doesn't fall back, it
+        // hangs. So when webgpu is requested but unavailable, run on CPU instead
+        // and warn once. An explicit non-webgpu device is always honoured as-is.
+        let device = this.device;
+        if (device === 'webgpu' && !hasWebGpu()) {
+          device = 'cpu';
+          if (!this.warnedFallback) {
+            this.warnedFallback = true;
+            console.error(
+              'TransformersEmbedder: device "webgpu" requested but no WebGPU runtime ' +
+                '(navigator.gpu) is available — running on CPU instead. Run under a ' +
+                'WebGPU-capable runtime (browser/Electron/Deno/Bun, or Node with a ' +
+                'WebGPU polyfill) for GPU acceleration, or set ' +
+                'AGENT_SEARCH_TRANSFORMERS_DEVICE=cpu to silence this.',
+            );
+          }
         }
 
         return mod.pipeline('feature-extraction', this.hfId, {
-          device: this.device,
+          device,
           dtype: this.dtype,
         });
       })();

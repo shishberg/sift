@@ -60,22 +60,39 @@ describe('empty input', () => {
 // ---------------------------------------------------------------------------
 
 describe('pipeline wiring', () => {
-  it('builds a feature-extraction pipeline with device webgpu by default', async () => {
+  it('builds a feature-extraction pipeline for the bge model', async () => {
+    const { pipeline } = mockTransformers(async () => out([fakeVec()]));
+    const e = new TransformersEmbedder({ device: 'cpu' });
+    await e.embed(['hi'], 'document');
+    const [task, model] = pipeline.mock.calls[0] as [string, string, unknown];
+    expect(task).toBe('feature-extraction');
+    expect(model).toBe('Xenova/bge-base-en-v1.5');
+  });
+
+  it('falls back to cpu when webgpu is requested but no navigator.gpu exists', async () => {
+    // Default device is webgpu; the test runtime has no WebGPU.
     const { pipeline } = mockTransformers(async () => out([fakeVec()]));
     const e = new TransformersEmbedder();
     await e.embed(['hi'], 'document');
-    const [task, model, opts] = pipeline.mock.calls[0] as [string, string, { device: string; dtype: string }];
-    expect(task).toBe('feature-extraction');
-    expect(model).toBe('Xenova/bge-base-en-v1.5');
+    const [, , opts] = pipeline.mock.calls[0] as [string, string, { device: string }];
+    expect(opts.device).toBe('cpu');
+  });
+
+  it('passes webgpu through when a WebGPU runtime is present', async () => {
+    vi.stubGlobal('navigator', { gpu: {} });
+    const { pipeline } = mockTransformers(async () => out([fakeVec()]));
+    const e = new TransformersEmbedder();
+    await e.embed(['hi'], 'document');
+    const [, , opts] = pipeline.mock.calls[0] as [string, string, { device: string }];
     expect(opts.device).toBe('webgpu');
   });
 
   it('honours an explicit device override', async () => {
     const { pipeline } = mockTransformers(async () => out([fakeVec()]));
-    const e = new TransformersEmbedder({ device: 'cpu' });
+    const e = new TransformersEmbedder({ device: 'dml' });
     await e.embed(['hi'], 'document');
     const [, , opts] = pipeline.mock.calls[0] as [string, string, { device: string }];
-    expect(opts.device).toBe('cpu');
+    expect(opts.device).toBe('dml');
   });
 });
 
