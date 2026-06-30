@@ -12,10 +12,13 @@ import {
   parseCli,
   homeRelative,
   resolveCwd,
+  deleteIndexFiles,
 } from './cli.js';
 import type { SearchResult } from '../search/search.js';
 import type { Chunk } from '../types.js';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
+import { mkdtempSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -824,6 +827,12 @@ describe('parseCli', () => {
   it('parses index command', () => {
     const args = parseCli(['index']);
     expect(args.command).toBe('index');
+    expect(args.delete).toBe(false);
+  });
+
+  it('parses index --delete and -d as a full-rebuild request', () => {
+    expect(parseCli(['index', '--delete'])).toEqual({ command: 'index', delete: true });
+    expect(parseCli(['index', '-d'])).toEqual({ command: 'index', delete: true });
   });
 
   it('parses watch command', () => {
@@ -1035,5 +1044,36 @@ describe('resolveCwd', () => {
 
   it('returns empty string for empty input', () => {
     expect(resolveCwd('', base, home)).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// deleteIndexFiles (index --delete)
+// ---------------------------------------------------------------------------
+
+describe('deleteIndexFiles', () => {
+  it('removes the db and its -wal/-shm sidecars, returning the path', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sift-del-'));
+    const db = join(dir, 'index.db');
+    for (const f of [db, `${db}-wal`, `${db}-shm`]) writeFileSync(f, 'x');
+
+    const returned = deleteIndexFiles(db);
+
+    expect(returned).toBe(db);
+    expect(existsSync(db)).toBe(false);
+    expect(existsSync(`${db}-wal`)).toBe(false);
+    expect(existsSync(`${db}-shm`)).toBe(false);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('does not throw when the files are absent', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sift-del-'));
+    const db = join(dir, 'missing.db');
+    expect(() => deleteIndexFiles(db)).not.toThrow();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('is a no-op for the in-memory db', () => {
+    expect(deleteIndexFiles(':memory:')).toBe(':memory:');
   });
 });

@@ -8,12 +8,12 @@
  */
 
 import { fileURLToPath } from 'node:url';
-import { realpathSync, existsSync, readFileSync } from 'node:fs';
+import { realpathSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { homedir } from 'node:os';
 import { readTranscript } from '../render/transcript.js';
 import type { Chunk } from '../types.js';
-import { Store } from '../index/store.js';
+import { Store, resolveDbPath } from '../index/store.js';
 import { createEmbedder } from '../embed/factory.js';
 import { assertEmbedModel } from '../embed/guard.js';
 import { buildRegistry } from '../adapters/registry.js';
@@ -34,7 +34,7 @@ sift — search across Claude, Codex, and pi agent session transcripts.
 USAGE
   sift <query> [--limit N] [--format text|json] [--cwd PATH | --all]
   sift show <sessionId>[:LINE | :START-END] [--lines RANGE] [--tools]
-  sift index
+  sift index [--delete | -d]
   sift watch
   sift status
   sift serve [--port N] [--watch]
@@ -144,15 +144,25 @@ OPTIONS
 sift index — one-shot index of all agent logs.
 
 USAGE
-  sift index
+  sift index [--delete | -d]
 
 DESCRIPTION
   Scan every agent log file, index it, and drain the embedding queue to
   completion, then exit. Shows a live progress bar. Embeddings are generated
   locally via ollama — make sure it is running (ollama serve).
 
+  Indexing is incremental: each file is read only from where the last run left
+  off (a stored byte offset), so a plain 'sift index' picks up new lines only and
+  never re-reads already-indexed content. Use --delete to force a full rebuild
+  when parsing changed and you want existing rows refreshed.
+
 OPTIONS
-  -h, --help   Show this help.
+  -d, --delete  Delete the index database first, then rebuild from scratch. This
+                re-reads every log and re-embeds everything (slow). Use it after
+                a change to how logs are parsed, or to flush stale rows. Stop any
+                running 'sift watch' / 'sift serve --watch' first — they hold the
+                old database open and would keep writing to it.
+  -h, --help    Show this help.
 `.trim(),
 
   watch: `
@@ -685,6 +695,8 @@ export interface ParsedCli {
   showTools?: boolean;
   port?: number;
   watch?: boolean;
+  /** index only: delete the existing index DB first, forcing a full rebuild. */
+  delete?: boolean;
 }
 
 /**
@@ -762,7 +774,10 @@ export function parseCli(argv: string[]): ParsedCli {
     const lines = parseLineRange(linesIdx !== -1 ? flagInput : suffixInput);
     return { command: 'show', sessionId, showTools, lines };
   }
-  if (first === 'index') return { command: 'index' };
+  if (first === 'index') {
+    const del = rest.includes('--delete') || rest.includes('-d');
+    return { command: 'index', delete: del };
+  }
   if (first === 'watch') return { command: 'watch' };
   if (first === 'status') return { command: 'status' };
   if (first === 'serve') {
@@ -837,6 +852,25 @@ export function parseCli(argv: string[]): ParsedCli {
   const queryTokens = argv.filter((_, i) => !indicesToDrop.has(i));
   const query = queryTokens.join(' ');
   return { command: 'search', query, limit, format, cwd, all };
+}
+
+// ---------------------------------------------------------------------------
+// index --delete: wipe the index for a full rebuild
+// ---------------------------------------------------------------------------
+
+/**
+ * Delete the index database and its SQLite sidecar files (`-wal`, `-shm`), so the
+ * next index run rebuilds from scratch (re-reading every log from offset 0 and
+ * re-embedding). Skips `:memory:`. Missing files are fine — `rmSync(force)` is a
+ * no-op. Returns the resolved db path that was targeted, for logging.
+ */
+export function deleteIndexFiles(dbPath?: string): string {
+  const resolved = resolveDbPath(dbPath);
+  if (resolved === ':memory:') return resolved;
+  for (const file of [resolved, `${resolved}-wal`, `${resolved}-shm`]) {
+    rmSync(file, { force: true });
+  }
+  return resolved;
 }
 
 // ---------------------------------------------------------------------------
@@ -1085,6 +1119,16 @@ async function main(): Promise<void> {
 
   // ---- index ----
   if (parsed.command === 'index') {
+    // --delete: wipe the index first so this run rebuilds everything from scratch.
+    if (parsed.delete) {
+      const deleted = deleteIndexFiles();
+      console.log(`Deleted index at ${deleted}. Rebuilding from scratch (re-embeds everything)…`);
+      // On Unix, unlinking the DB doesn't stop a separately-running watch/serve
+      // process that already has it open — that process keeps writing to the now
+      // orphaned file. Tell the user to stop those first.
+      console.log('Note: stop any running `sift watch` / `sift serve --watch` before reindexing.');
+    }
+
     const store = new Store();
     const embedder = createEmbedder();
     const registry = buildRegistry();

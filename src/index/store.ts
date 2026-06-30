@@ -9,6 +9,15 @@ import type { AgentType, Chunk, JsonlAgentType } from '../types.js';
 export const EMBED_DIMS = 768;
 
 /**
+ * Resolve the index database path: explicit arg → `$SIFT_DB` → `~/.sift/index.db`.
+ * Single source of truth shared by the Store constructor and the reindex/delete
+ * path in the CLI, so both always agree on which file is the index.
+ */
+export function resolveDbPath(dbPath?: string): string {
+  return dbPath ?? process.env.SIFT_DB ?? join(homedir(), '.sift', 'index.db');
+}
+
+/**
  * Subquery (one `?` bind = an absolute cwd) yielding the chunk ids of every
  * session that ran in that directory. cwd is stored on source_files, so we go
  * cwd → file paths → chunk ids. Used to scope vec/FTS search to one cwd.
@@ -125,8 +134,7 @@ export class Store {
    *                `$SIFT_DB` or `~/.sift/index.db`.
    */
   constructor(dbPath?: string) {
-    const resolved =
-      dbPath ?? process.env.SIFT_DB ?? join(homedir(), '.sift', 'index.db');
+    const resolved = resolveDbPath(dbPath);
 
     this.dbPath = resolved;
 

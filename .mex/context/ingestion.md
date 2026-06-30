@@ -63,6 +63,14 @@ the offset was written first, so a parse/insert error silently skipped the file'
 content forever.) When there are no new complete lines, only the tail state is
 written (to record inode/size movement).
 
+**Full rebuild — `sift index --delete` (`-d`).** Because indexing is incremental,
+a parsing change (e.g. a new harness-tag strip, or excluding compaction summaries)
+only affects NEW lines; rows indexed before the change keep the old text. To
+refresh them, `index --delete` deletes the index db + its `-wal`/`-shm` sidecars
+(`deleteIndexFiles` in `cli.ts`, via the shared `resolveDbPath`) before indexing,
+forcing a re-read from offset 0 and a full re-embed. The opencode cursor and cwd
+live in the same db, so they reset too — the rebuild is genuinely from scratch.
+
 ## Parsing
 Each new line is parsed by the agent adapter for that directory into the common
 chunk shape. Ingestion itself does not know agent-specific JSON — that lives

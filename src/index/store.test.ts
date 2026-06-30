@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import Database from 'better-sqlite3';
-import { Store, EMBED_DIMS } from './store.js';
+import { Store, EMBED_DIMS, resolveDbPath } from './store.js';
 import type { Chunk } from '../types.js';
 
 function makeChunk(overrides: Partial<Chunk> = {}): Chunk {
@@ -22,6 +22,29 @@ function makeChunk(overrides: Partial<Chunk> = {}): Chunk {
 function makeEmbedding(value = 0.1): number[] {
   return Array(EMBED_DIMS).fill(value);
 }
+
+describe('resolveDbPath', () => {
+  const original = process.env.SIFT_DB;
+  afterEach(() => {
+    if (original === undefined) delete process.env.SIFT_DB;
+    else process.env.SIFT_DB = original;
+  });
+
+  it('prefers an explicit path over $SIFT_DB and the default', () => {
+    process.env.SIFT_DB = '/env/path.db';
+    expect(resolveDbPath('/explicit/path.db')).toBe('/explicit/path.db');
+  });
+
+  it('falls back to $SIFT_DB when no explicit path is given', () => {
+    process.env.SIFT_DB = '/env/path.db';
+    expect(resolveDbPath()).toBe('/env/path.db');
+  });
+
+  it('falls back to ~/.sift/index.db when neither is set', () => {
+    delete process.env.SIFT_DB;
+    expect(resolveDbPath()).toBe(join(homedir(), '.sift', 'index.db'));
+  });
+});
 
 describe('Store', () => {
   let store: Store;
