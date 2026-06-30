@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { createEmbedder } from './factory.js';
 import { OllamaEmbedder } from './ollama.js';
 import { FastEmbedEmbedder } from './fastembed.js';
+import { TransformersEmbedder } from './transformers.js';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -20,6 +21,11 @@ describe('createEmbedder', () => {
   it('builds a fastembed embedder when AGENT_SEARCH_EMBED_PROVIDER=fastembed', () => {
     vi.stubEnv('AGENT_SEARCH_EMBED_PROVIDER', 'fastembed');
     expect(createEmbedder()).toBeInstanceOf(FastEmbedEmbedder);
+  });
+
+  it('builds a transformers embedder when AGENT_SEARCH_EMBED_PROVIDER=transformers', () => {
+    vi.stubEnv('AGENT_SEARCH_EMBED_PROVIDER', 'transformers');
+    expect(createEmbedder()).toBeInstanceOf(TransformersEmbedder);
   });
 
   it('is case-insensitive on the provider name', () => {

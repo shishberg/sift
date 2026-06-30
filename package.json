@@ -23,6 +23,7 @@
     "sqlite-vec": "^0.1.6"
   },
   "optionalDependencies": {
+    "@huggingface/transformers": "^4.2.0",
     "fastembed": "^2.1.0"
   },
   "devDependencies": {
