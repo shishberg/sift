@@ -14,6 +14,20 @@ const PERMISSION_LINE = JSON.stringify({ type: 'permission-mode', permissionMode
 const ATTACHMENT_LINE = JSON.stringify({ type: 'attachment', sessionId: SESSION_ID });
 const SYSTEM_LINE = JSON.stringify({ type: 'system', sessionId: SESSION_ID });
 
+// --- FIXTURE: post-compaction summary record ---
+// A `type: 'user'` record flagged isCompactSummary — a machine-generated recap of
+// the compacted-away conversation, not a real user turn. Faithfully rendered as a
+// collapsible compaction block; deliberately NOT indexed (it duplicates content
+// already in the log and is synthetic). Real shape from a compacted session.
+const COMPACT_SUMMARY_LINE = JSON.stringify({
+  type: 'user',
+  isCompactSummary: true,
+  isVisibleInTranscriptOnly: true,
+  message: { role: 'user', content: 'This session is being continued from a previous conversation…' },
+  timestamp: '2026-06-30T10:00:00.000Z',
+  sessionId: SESSION_ID,
+});
+
 // --- FIXTURE: user message with array content (text block) ---
 // Trimmed from real log; structure preserved.
 const USER_TEXT_ARRAY_LINE = JSON.stringify({
@@ -149,6 +163,10 @@ describe('ClaudeAdapter', () => {
 
     it('returns [] for system records', () => {
       expect(adapter.parseLine(SYSTEM_LINE, CTX)).toEqual([]);
+    });
+
+    it('returns [] for post-compaction summary records (isCompactSummary)', () => {
+      expect(adapter.parseLine(COMPACT_SUMMARY_LINE, CTX)).toEqual([]);
     });
 
     it('returns [] for blank lines', () => {

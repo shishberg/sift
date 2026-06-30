@@ -60,6 +60,11 @@ export class ClaudeAdapter implements Adapter {
     const type = record['type'];
     if (!INDEXED_TYPES.has(type as string)) return [];
 
+    // Post-compaction summary records are `type: 'user'` but machine-generated
+    // recaps, not real user turns. Skip indexing: they duplicate content already
+    // in the log and are synthetic. (Still rendered as a collapsible block.)
+    if (record['isCompactSummary'] === true) return [];
+
     const timestamp = (record['timestamp'] as string | undefined) ?? '';
     // Session id: sidechain (subagent) records key by their own file's stem, since
     // their `sessionId` field points at the parent. All other records prefer the
