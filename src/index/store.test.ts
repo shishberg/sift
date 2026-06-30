@@ -430,15 +430,40 @@ describe('Store', () => {
       expect(store.recentSessions()[0]?.cwd).toBe('');
     });
 
-    it('returns exactly one row per session even when the latest timestamp ties', () => {
-      // Two chunks share the max timestamp; the later-inserted (higher id) wins.
-      store.addChunk(makeChunk({ sessionId: 's1', lineNumber: 1, text: 'tie A', timestamp: '2026-01-01T00:00:09Z' }));
-      store.addChunk(makeChunk({ sessionId: 's1', lineNumber: 2, text: 'tie B', timestamp: '2026-01-01T00:00:09Z' }));
+    it("picks the session's latest chunk by line_number, not by insertion order", () => {
+      // Two chunks share the max timestamp. Insert in REVERSE line_number
+      // order so an id-tiebreak (insertion order) would pick the wrong row.
+      store.addChunk(makeChunk({ sessionId: 's1', lineNumber: 2, text: 'newer line', timestamp: '2026-01-01T00:00:09Z' }));
+      store.addChunk(makeChunk({ sessionId: 's1', lineNumber: 1, text: 'older line', timestamp: '2026-01-01T00:00:09Z' }));
 
       const rows = store.recentSessions();
       expect(rows).toHaveLength(1);
-      expect(rows[0]?.snippet).toBe('tie B');
       expect(rows[0]?.lineNumber).toBe(2);
+      expect(rows[0]?.snippet).toBe('newer line');
+    });
+
+    it("prefers the assistant text over a same-line tool_use (claude's text+tool_use on one JSONL line)", () => {
+      // Production scenario: the claude adapter emits two chunks per assistant
+      // message that contains both a text block and a tool_use block — both at
+      // the same lineNumber and the same timestamp (see src/adapters/claude.ts).
+      // The text block is pushed first (lower id), the tool_use second (higher
+      // id). recentSessions must surface the text as the "latest message" of
+      // the session, not the tool_use.
+      store.addChunk(
+        makeChunk({ sessionId: 's1', lineNumber: 5, role: 'assistant', text: 'let me check that', timestamp: '2026-01-01T00:00:09Z' }),
+      );
+      store.addChunk(
+        makeChunk({
+          sessionId: 's1', lineNumber: 5, role: 'tool', text: '',
+          toolCall: { name: 'Read', args: '{}' },
+          timestamp: '2026-01-01T00:00:09Z',
+        }),
+      );
+
+      const rows = store.recentSessions();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.role).toBe('assistant');
+      expect(rows[0]?.snippet).toBe('let me check that');
     });
   });
 

@@ -288,17 +288,21 @@ export class Store {
 
     // Most recent message per session, newest first. Done in two index-backed
     // steps so it never scans the whole chunks table: `top` picks the N most
-    // recently active sessions (GROUP BY + MAX over chunks_session_ts_idx), then
-    // each session's single latest chunk is fetched (id tiebreak for equal
-    // timestamps). The correlated subquery resolves cwd like getSessionCwd.
-    // (A ROW_NUMBER() window over all chunks did the same thing but took ~60s on
-    // a 195k-row index — see chunks_session_ts_idx.)
+    // recently active sessions (GROUP BY + MAX over chunks_session_line_idx), then
+    // each session's single latest chunk is fetched (line_number desc, id asc —
+    // the id tiebreak is needed for the claude adapter, which emits two chunks
+    // at the same lineNumber+timestamp for a single assistant message that
+    // contains both text and tool_use blocks; the text block is pushed first,
+    // so id asc surfaces the text, not the tool). The correlated subquery
+    // resolves cwd like getSessionCwd. (A ROW_NUMBER() window over all chunks
+    // did the same thing but took ~60s on a 195k-row index — see
+    // chunks_session_line_idx.)
     this.stmtRecentSessions = this.db.prepare(`
       WITH top AS (
-        SELECT session_id, MAX(timestamp) AS ts
+        SELECT session_id, MAX(line_number) AS line_number
         FROM   chunks
         GROUP  BY session_id
-        ORDER  BY ts DESC
+        ORDER  BY line_number DESC
         LIMIT  ?
       )
       SELECT
@@ -319,10 +323,10 @@ export class Store {
       JOIN chunks c ON c.id = (
         SELECT id FROM chunks
         WHERE session_id = top.session_id
-        ORDER BY timestamp DESC, id DESC
+        ORDER BY line_number DESC, id ASC
         LIMIT 1
       )
-      ORDER BY c.timestamp DESC
+      ORDER BY c.line_number DESC
     `);
 
     // ---- transactions ----
@@ -435,13 +439,14 @@ export class Store {
       ON chunks(id) WHERE needs_embed = 1
     `);
 
-    // Composite index on (session_id, timestamp): serves every per-session lookup
+    // Composite index on (session_id, line_number): serves every per-session lookup
     // — recentSessions' grouping + latest-row fetch, getSessionChunks/getSessionFiles'
     // session_id equality, and the cwd resolution subquery. Without it those are
     // full table scans; recentSessions in particular went from ~60s to ~20ms.
     this.db.exec(`
-      CREATE INDEX IF NOT EXISTS chunks_session_ts_idx
-      ON chunks(session_id, timestamp)
+      DROP INDEX IF EXISTS chunks_session_ts_idx;
+      CREATE INDEX IF NOT EXISTS chunks_session_line_idx
+      ON chunks(session_id, line_number)
     `);
   }
 
