@@ -12,13 +12,45 @@ edges:
     condition: when a decision relates to system structure
   - target: context/stack.md
     condition: when a decision relates to technology choice
-last_updated: 2026-06-27
+last_updated: 2026-06-30
 ---
 
 # Decisions
 
 <!-- When a decision changes: do not delete the old entry. Mark it superseded,
      add the new entry above it. History is the event clock. -->
+
+### Pluggable local embedders (ollama / fastembed / transformers.js) + WebGPU findings
+*Date:* 2026-06-30
+*Status:* Active
+*Decision:* Embedding stays behind the `Embedder` interface with `createEmbedder()`
+(`src/embed/factory.ts`) the only provider switch (`AGENT_SEARCH_EMBED_PROVIDER`).
+Three local providers: `ollama` (default, nomic-embed-text, uses the GPU via ollama),
+`fastembed` (in-process ONNX on CPU, bge-base-en-v1.5), `transformers` (transformers.js,
+device=webgpu by default, bge-base-en-v1.5). All 768-dim to fit the fixed sqlite-vec
+schema; each has a distinct stored model id so the guard forces a reindex on switch.
+Both JS providers are `optionalDependencies`, dynamic-`import()`ed.
+*Reasoning:* Wanted a no-service / no-GPU option (fastembed) and an in-process GPU
+option (transformers.js WebGPU) for machines without ollama.
+*Benchmark (2026-06-30, Apple Silicon, 2021 chunks from one claude project, fixed corpus):*
+- Index embed throughput: ollama **~26 chunks/s** (77s total; Metal GPU via ollama) ·
+  fastembed **~1.8/s** (18.4 min; CPU) · transformers CPU **~1/s** (~1.1s/chunk isolated).
+- Search latency: ollama cold **~205ms** / warm **~39ms** · fastembed cold **~730ms** /
+  warm **~399ms** · transformers cold **~1.5s** (ONNX model load per process) / warm **~23ms**.
+- Relevance (top-10 overlap on on-domain queries): fastembed-vs-ollama **7.2/10**,
+  transformers-vs-ollama **6.6/10** (partial index); top-1 usually agrees. Where there's
+  a strong lexical match the shared FTS half keeps all three aligned; pure-semantic
+  ranking diverges because the models differ. No provider is clearly "more relevant".
+*WebGPU reality (empirical, not just docs):* stock Node has no `navigator.gpu`, and
+passing `device:"webgpu"` to onnxruntime there **hangs** (blocks the event loop) — so the
+transformers provider now auto-falls-back to CPU when WebGPU is absent. Tried Deno
+`--unstable-webgpu` (the documented server-side path): it exposes `navigator.gpu` + a
+Metal adapter, but transformers.js v4.2.0 + onnxruntime-web WebGPU **inference deadlocks**
+at 0% CPU on bge-base (fp32 and fp16) on this machine — the pipeline loads but the first
+inference never returns. So as of now the only reliable GPU embedding path here is ollama
+(its own Metal runtime). transformers.js WebGPU is kept for browser/Electron/future use.
+*Consequences:* On a GPU box, ollama wins on speed by ~14x. fastembed/transformers are the
+CPU/no-service fallbacks (similar speed + relevance). Switching providers = reindex.
 
 ## Decision Log
 
