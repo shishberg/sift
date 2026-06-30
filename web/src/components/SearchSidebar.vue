@@ -212,7 +212,6 @@ const displayList = computed(() => (searched.value ? results.value : recent.valu
             v-model="query"
             type="text"
             placeholder="Search sessions…"
-            autofocus
             autocomplete="off"
             class="w-full rounded-md border px-3 py-2 outline-none transition-shadow"
             style="
