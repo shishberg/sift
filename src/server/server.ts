@@ -54,6 +54,13 @@ export interface ServerOptions {
   port?: number;
   /** Directory to serve static files from. Defaults to <root>/web/dist. */
   staticDir?: string;
+  /**
+   * Long-poll tuning for GET /api/status. When a request carries a `since` token
+   * equal to the current status, the handler holds the response open until the
+   * status changes or `timeoutMs` elapses, checking every `intervalMs`. Defaults:
+   * 30s timeout, 1s interval. Injectable so tests can use small values.
+   */
+  statusLongPoll?: { timeoutMs?: number; intervalMs?: number };
 }
 
 // ---------------------------------------------------------------------------
@@ -61,6 +68,11 @@ export interface ServerOptions {
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_PORT = 3737;
+
+/** Default long-poll window for /api/status: hold the request up to 30s. */
+export const STATUS_LONGPOLL_TIMEOUT_MS = 30_000;
+/** How often the long-poll handler re-checks the status while waiting. */
+export const STATUS_LONGPOLL_INTERVAL_MS = 1_000;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -113,11 +125,19 @@ function parseLimit(searchParams: URLSearchParams): number | undefined | 'invali
   return parsed;
 }
 
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Compact token identifying a status snapshot, for long-poll change detection. */
+function statusToken(s: StatusResponse): string {
+  return `${s.total}:${s.embedded}:${s.pending}`;
+}
+
 async function handleApi(
   pathname: string,
   searchParams: URLSearchParams,
   res: http.ServerResponse,
   deps: ServerDeps,
+  longPoll: { timeoutMs: number; intervalMs: number },
 ): Promise<void> {
   // GET /api/search?q=<string>&limit=<n>
   if (pathname === '/api/search') {
@@ -162,9 +182,37 @@ async function handleApi(
     return;
   }
 
-  // GET /api/status
+  // GET /api/status[?since=<token>] — long-polling.
+  // Without `since`, or when `since` differs from the current status, return
+  // immediately. When `since` matches the current status, hold the response open
+  // until the status changes or the timeout elapses, so the client polls at most
+  // once per timeout window instead of every second.
   if (pathname === '/api/status') {
-    const stats = deps.getStatus();
+    const since = searchParams.get('since');
+    let stats = deps.getStatus();
+
+    if (since !== null && since === statusToken(stats)) {
+      const deadline = Date.now() + longPoll.timeoutMs;
+      let closed = false;
+      const onClose = (): void => {
+        closed = true;
+      };
+      res.on('close', onClose);
+      try {
+        while (!closed && Date.now() < deadline) {
+          await delay(Math.max(1, Math.min(longPoll.intervalMs, deadline - Date.now())));
+          // Client gone — stop before touching deps or the response.
+          if (closed || res.writableEnded) return;
+          stats = deps.getStatus();
+          if (statusToken(stats) !== since) break;
+        }
+      } finally {
+        res.off('close', onClose);
+      }
+      // Client went away mid-wait — nothing to send.
+      if (closed || res.writableEnded) return;
+    }
+
     jsonOk(res, stats);
     return;
   }
@@ -225,6 +273,10 @@ function serveStatic(pathname: string, staticDir: string, res: http.ServerRespon
  */
 export function createServer(deps: ServerDeps, opts?: ServerOptions): http.Server {
   const staticDir = opts?.staticDir ?? DEFAULT_STATIC_DIR;
+  const longPoll = {
+    timeoutMs: opts?.statusLongPoll?.timeoutMs ?? STATUS_LONGPOLL_TIMEOUT_MS,
+    intervalMs: opts?.statusLongPoll?.intervalMs ?? STATUS_LONGPOLL_INTERVAL_MS,
+  };
 
   return http.createServer((req, res) => {
     // Only handle GET; reject everything else cleanly.
@@ -238,9 +290,11 @@ export function createServer(deps: ServerDeps, opts?: ServerOptions): http.Serve
     const { pathname, searchParams } = url;
 
     if (pathname.startsWith('/api/')) {
-      handleApi(pathname, searchParams, res, deps).catch((err: unknown) => {
+      handleApi(pathname, searchParams, res, deps, longPoll).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
-        // Only write head if headers not sent yet.
+        // The response may already be finished (e.g. client disconnected during a
+        // long-poll wait) — writing again would throw. Only respond if still open.
+        if (res.writableEnded || res.destroyed) return;
         if (!res.headersSent) {
           jsonError(res, 500, msg);
         } else {

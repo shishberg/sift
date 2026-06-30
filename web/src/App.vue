@@ -8,17 +8,41 @@ import { sessionHeader } from '@/lib/sessionHeader';
 import type { StatusResponse } from './types';
 
 const status = ref<StatusResponse>({ total: 0, embedded: 0, pending: 0 });
-let pollTimer: ReturnType<typeof setInterval> | null = null;
+let pollAbort: AbortController | null = null;
+// Bumped on every mount/unmount. A running loop carries the generation it
+// started under and exits as soon as it no longer matches, so a remount (e.g.
+// HMR) can never leave a second loop running beside the new one.
+let pollGeneration = 0;
 
-async function fetchStatus(): Promise<void> {
-  try {
-    const res = await fetch('/api/status');
-    if (res.ok) {
-      status.value = (await res.json()) as StatusResponse;
+function statusToken(s: StatusResponse): string {
+  return `${s.total}:${s.embedded}:${s.pending}`;
+}
+
+// Long-poll loop: each request carries the last-seen status as `since`, and the
+// server holds the response open (up to ~30s) until the status changes. So when
+// nothing is indexing we make ~1 request per 30s instead of one per second, and
+// still react within a round-trip when the queue moves.
+async function pollStatusLoop(generation: number): Promise<void> {
+  while (generation === pollGeneration) {
+    pollAbort = new AbortController();
+    try {
+      const since = encodeURIComponent(statusToken(status.value));
+      const res = await fetch(`/api/status?since=${since}`, { signal: pollAbort.signal });
+      if (generation !== pollGeneration) break; // unmounted during the request
+      if (res.ok) {
+        status.value = (await res.json()) as StatusResponse;
+      } else {
+        await sleep(3000); // unexpected status — back off before retrying
+      }
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') break; // unmounted
+      await sleep(3000); // server unreachable — back off, keep last value
     }
-  } catch {
-    // Server not reachable — keep last value.
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 const progressValue = computed((): number => {
@@ -81,12 +105,13 @@ function stopResize(): void {
 }
 
 onMounted(() => {
-  void fetchStatus();
-  pollTimer = setInterval(() => void fetchStatus(), 1500);
+  const generation = ++pollGeneration;
+  void pollStatusLoop(generation);
 });
 
 onUnmounted(() => {
-  if (pollTimer !== null) clearInterval(pollTimer);
+  pollGeneration++; // invalidate the running loop
+  pollAbort?.abort();
   window.removeEventListener('mousemove', onResize);
   window.removeEventListener('mouseup', stopResize);
 });

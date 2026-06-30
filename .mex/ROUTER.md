@@ -100,7 +100,9 @@ collapsed by default, styled like the tool block.
   body renders the summary as markdown); it scrolls to and ring-highlights the matched item. On a session
   page the global header hosts the session controls (agent / session id + copy / working
   dir + copy-log-path; no back button — the sidebar is always present) via a shared
-  `sessionHeader` store. Live queue Progress bar polls `/api/status`. Copy buttons go through
+  `sessionHeader` store. Live queue Progress bar long-polls `/api/status?since=<total:embedded:pending>`
+  (`App.vue` loop; server holds the request up to 30s, returns early on change — ~1 req/30s when idle).
+  Copy buttons go through
   `web/src/lib/clipboard.ts` `copyText`, which falls back to a hidden-textarea
   `execCommand('copy')` when `navigator.clipboard` is absent (insecure http:// origins).
 

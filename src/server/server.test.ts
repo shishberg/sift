@@ -6,7 +6,6 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import * as http from 'node:http';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -21,8 +20,9 @@ import type { TranscriptItem } from '../types.js';
 
 async function startTestServer(
   deps: ServerDeps,
+  opts: { statusLongPoll?: { timeoutMs?: number; intervalMs?: number } } = {},
 ): Promise<{ url: string; close: () => Promise<void> }> {
-  const server = createServer(deps, { staticDir: '/nonexistent/path' });
+  const server = createServer(deps, { staticDir: '/nonexistent/path', ...opts });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const addr = server.address() as { port: number };
   const url = `http://127.0.0.1:${addr.port}`;
@@ -315,6 +315,52 @@ describe('GET /api/status', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as StatusResponse;
     expect(body).toEqual({ total: 100, embedded: 60, pending: 40 });
+  });
+
+  it('returns immediately when `since` differs from the current status', async () => {
+    const res = await fetch(`${url}/api/status?since=1:2:3`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ total: 100, embedded: 60, pending: 40 });
+  });
+});
+
+describe('GET /api/status — long-polling', () => {
+  it('holds the response until the timeout when status is unchanged', async () => {
+    const { url, close } = await startTestServer(makeDeps(), {
+      statusLongPoll: { timeoutMs: 150, intervalMs: 20 },
+    });
+    try {
+      const start = Date.now();
+      // since == current token → should block until the timeout.
+      const res = await fetch(`${url}/api/status?since=100:60:40`);
+      const elapsed = Date.now() - start;
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ total: 100, embedded: 60, pending: 40 });
+      expect(elapsed).toBeGreaterThanOrEqual(120); // waited ~timeoutMs, not instant
+    } finally {
+      await close();
+    }
+  });
+
+  it('returns early when the status changes during the wait', async () => {
+    let current: StatusResponse = { total: 100, embedded: 60, pending: 40 };
+    const { url, close } = await startTestServer(makeDeps({ getStatus: () => current }), {
+      statusLongPoll: { timeoutMs: 2000, intervalMs: 20 },
+    });
+    try {
+      // Flip the status shortly after the request starts.
+      setTimeout(() => {
+        current = { total: 100, embedded: 80, pending: 20 };
+      }, 60);
+      const start = Date.now();
+      const res = await fetch(`${url}/api/status?since=100:60:40`);
+      const elapsed = Date.now() - start;
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ total: 100, embedded: 80, pending: 20 });
+      expect(elapsed).toBeLessThan(1500); // returned on change, well before timeout
+    } finally {
+      await close();
+    }
   });
 });
 
