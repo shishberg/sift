@@ -19,6 +19,7 @@ import { assertEmbedModel } from '../embed/guard.js';
 import { buildRegistry } from '../adapters/registry.js';
 import { EmbedWorker, backfillCwd } from '../ingest/indexer.js';
 import { Watcher } from '../ingest/watcher.js';
+import { OpencodePoller } from '../ingest/opencode-poller.js';
 import { search, type SearchResult } from '../search/search.js';
 import { startServer, DEFAULT_PORT } from '../server/server.js';
 import { OpenCodeSource, DEFAULT_OPENCODE_DB_PATH } from '../sources/opencode.js';
@@ -847,22 +848,63 @@ export function parseCli(argv: string[]): ParsedCli {
  * not installed (no DB file). Logs counts when chunks are found, warns on error.
  *
  * Watch integration: opencode is not a JSONL file-watcher target, so this is a
- * one-shot pull at the start of both `index` and `watch` runs. For live watch
- * coverage you would poll the DB file's mtime; that is left as a future
- * enhancement. The cursor persists across runs, so re-indexing picks up only
- * new sessions.
+ * one-shot pull at the start of `index`, `watch`, and `serve --watch` runs to
+ * land the existing backlog immediately. For live coverage *during* watch, see
+ * {@link createOpencodePoller}. The cursor persists across runs, so each pull
+ * picks up only new sessions.
  */
 async function importOpencode(store: Store, write: (s: string) => void): Promise<void> {
   if (!existsSync(DEFAULT_OPENCODE_DB_PATH)) return;
   try {
     const source = new OpenCodeSource(DEFAULT_OPENCODE_DB_PATH);
-    const count = source.index(store);
-    source.close();
-    if (count > 0) write(`Indexed ${count} chunks from opencode.`);
+    try {
+      const count = source.index(store);
+      if (count > 0) write(`Indexed ${count} chunks from opencode.`);
+    } finally {
+      source.close(); // close even if index() throws — no leaked handle
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     write(`[warn] opencode import failed (skipped): ${msg}`);
   }
+}
+
+/**
+ * Build the live opencode poller used by `watch` and `serve --watch`. opencode
+ * is a SQLite DB, not a watched JSONL file, so the chokidar watcher never sees
+ * its writes; this interval poller covers everything after the one-shot startup
+ * import. Each tick runs the cheap cursor-based import and kicks the embed
+ * worker when it indexed new chunks. Returns undefined when opencode isn't
+ * installed (no DB file) or the DB can't be opened, so the caller skips cleanly.
+ *
+ * The caller owns the lifecycle: call `.start()` to begin polling and `.stop()`
+ * on shutdown (it closes the DB connection via onStop).
+ */
+function createOpencodePoller(
+  store: Store,
+  embedWorker: EmbedWorker,
+  write: (s: string) => void,
+): OpencodePoller | undefined {
+  if (!existsSync(DEFAULT_OPENCODE_DB_PATH)) return undefined;
+  let source: OpenCodeSource;
+  try {
+    // One long-lived read-only connection for the poll lifetime.
+    source = new OpenCodeSource(DEFAULT_OPENCODE_DB_PATH);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    write(`[warn] opencode live poll disabled (open failed): ${msg}`);
+    return undefined;
+  }
+  return new OpencodePoller({
+    poll: () => source.index(store),
+    onChunksIndexed: () => embedWorker.kick(),
+    onError: (err) => {
+      // Transient (e.g. DB locked) — log and let the next tick retry.
+      const msg = err instanceof Error ? err.message : String(err);
+      write(`[warn] opencode poll failed (will retry): ${msg}`);
+    },
+    onStop: () => source.close(),
+  });
 }
 
 /**
@@ -1111,6 +1153,7 @@ async function main(): Promise<void> {
 
     let watcher: Watcher | undefined;
     let embedWorker: EmbedWorker | undefined;
+    let opencodePoller: OpencodePoller | undefined;
 
     if (parsed.watch) {
       const registry = buildRegistry();
@@ -1119,6 +1162,11 @@ async function main(): Promise<void> {
       console.log('Starting file watcher + embed worker…');
       watcher.start();
       embedWorker.kick();
+      // opencode is a SQLite source, not a watched file: one-shot pull for the
+      // backlog, then interval-poll for live writes (chokidar never sees them).
+      await importOpencode(store, (s) => console.log(s));
+      opencodePoller = createOpencodePoller(store, embedWorker, (s) => console.log(s));
+      opencodePoller?.start();
     }
 
     const { url, server } = await startServer(
@@ -1171,6 +1219,7 @@ async function main(): Promise<void> {
     process.once('SIGINT', () => {
       console.log('\nStopping…');
       void (async () => {
+        opencodePoller?.stop();
         if (watcher) await watcher.stop();
         await new Promise<void>((resolve, reject) =>
           server.close((err) => (err ? reject(err) : resolve())),
@@ -1191,6 +1240,9 @@ async function main(): Promise<void> {
     const registry = buildRegistry();
     const embedWorker = new EmbedWorker(store, embedder, { backoffMs: 1000 });
     const watcher = new Watcher(store, registry, embedWorker);
+    // Live opencode coverage: the chokidar watcher only sees JSONL, so poll the
+    // opencode SQLite DB on an interval (created after the embed model guard).
+    let opencodePoller: OpencodePoller | undefined;
 
     const isTTY = process.stdout.isTTY ?? false;
     let stopped = false;
@@ -1199,6 +1251,7 @@ async function main(): Promise<void> {
       stopped = true;
       if (isTTY) process.stdout.write('\n');
       console.log('Stopping watcher…');
+      opencodePoller?.stop();
       void watcher.stop().then(() => {
         store.close();
         process.exit(0);
@@ -1216,13 +1269,16 @@ async function main(): Promise<void> {
       process.exit(1);
     }
 
-    // One-shot opencode pull at startup. Future: poll DB file mtime for live updates.
+    // One-shot opencode pull at startup so the existing backlog lands now…
     await importOpencode(store, (s) => console.log(s));
     await runCwdBackfill(store, registry, (s) => console.log(s));
 
     console.log('Watching agent log directories. Ctrl-C to stop.');
     watcher.start();
     embedWorker.kick();
+    // …then poll opencode on an interval so live writes get picked up too.
+    opencodePoller = createOpencodePoller(store, embedWorker, (s) => console.log(s));
+    opencodePoller?.start();
 
     let lastBar = '';
     while (!stopped) {
