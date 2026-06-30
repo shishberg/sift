@@ -31,9 +31,11 @@ last_updated: 2026-06-30
 
 These hold append-only JSONL — one JSON object per line. They are READ ONLY.
 The watched dirs are derived from the adapters' `rootDir`s (override with
-`AGENT_SEARCH_DIRS`). opencode is also indexed, but NOT via the watcher — it's a
-SQLite DB read by `OpenCodeSource` as a one-shot import at startup (see
-`context/agent-adapters.md`).
+`AGENT_SEARCH_DIRS`). opencode is also indexed, but NOT via the chokidar
+watcher — it's a SQLite DB read by `OpenCodeSource` (see
+`context/agent-adapters.md`). Because opencode runs SQLite in WAL mode the `.db`
+mtime doesn't reliably change on writes, so file-watching it is unreliable;
+instead it is **interval-polled**. See "opencode live polling" below.
 
 ## Trigger
 A chokidar watcher over the directories above. On startup it also scans existing
@@ -87,3 +89,19 @@ writes the sqlite-vec row, and clears the flag — atomically. Durable across
 restarts because it's just a column in SQLite; backfill is the watcher's startup
 scan re-enqueueing anything unembedded. `sift status` reports total /
 embedded / pending.
+
+## opencode live polling
+`sift watch` and `sift serve --watch` do a one-shot `importOpencode` at startup
+(lands the existing backlog immediately), then run an `OpencodePoller`
+(`src/ingest/opencode-poller.ts`) so live opencode writes are picked up while
+running — not just once at startup. Each tick (default
+`DEFAULT_OPENCODE_POLL_INTERVAL_MS` = 2000ms) runs the cheap cursor-based
+`OpenCodeSource.index(store)` over a single long-lived read-only connection; if
+it indexed > 0 chunks it kicks the `EmbedWorker`. Errors (e.g. "database is
+locked") are swallowed and logged so the loop never dies; the next tick retries.
+An in-flight guard skips a tick if the previous import is still running. The CLI
+wires `poller.stop()` (clears the interval, closes the connection) into the
+existing SIGINT/shutdown paths. Skips cleanly when opencode isn't installed (no
+DB file). `index` stays one-shot (no poller). The poller is generic — it takes
+callbacks and knows nothing about the opencode format, which stays in
+`src/sources/opencode.ts`.

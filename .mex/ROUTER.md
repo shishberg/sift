@@ -38,6 +38,7 @@ See `context/impl-spec.md` for the concrete build and `context/decisions.md` for
 
 **Working (all verified end-to-end against real logs, ~35k chunks):**
 - chokidar watcher over the agent session dirs (dirs derived from adapter `rootDir`s)
+- opencode (SQLite, WAL) is interval-polled live during `watch`/`serve --watch` (not just one-shot at startup) — see `context/ingestion.md` "opencode live polling"
 - Agent adapters: claude, codex, pi (JSONL) + an opencode SQLite **source**.
   claude subagent transcripts (`<parentSessionId>/subagents/agent-*.jsonl`) are
   keyed as their OWN sessions by filename stem, not the parent `sessionId` field
