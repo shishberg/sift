@@ -52,14 +52,28 @@ const stmtInsertMessage = (db: Database.Database) =>
 
 function insertMessage(
   db: Database.Database,
-  opts: { id: string; sessionId: string; role: 'user' | 'assistant'; timeCreated?: number },
+  opts: {
+    id: string;
+    sessionId: string;
+    role: 'user' | 'assistant';
+    timeCreated?: number;
+    // opencode flags a post-compaction summary message with summary:true
+    // (mode/agent 'compaction'); set this to simulate one.
+    summary?: boolean;
+  },
 ): void {
+  const data: Record<string, unknown> = { role: opts.role };
+  if (opts.summary) {
+    data.summary = true;
+    data.mode = 'compaction';
+    data.agent = 'compaction';
+  }
   stmtInsertMessage(db).run(
     opts.id,
     opts.sessionId,
     opts.timeCreated ?? 1_000_000,
     opts.timeCreated ?? 1_000_000,
-    JSON.stringify({ role: opts.role }),
+    JSON.stringify(data),
   );
 }
 
@@ -447,5 +461,44 @@ describe('OpenCodeSource', () => {
       const items = source.readTranscript('s1');
       expect(items[0]!.tool).toMatchObject({ name: 'read', output: 'File not found', isError: true });
     });
+
+    it('renders a summary:true (compaction) message as a compaction item', () => {
+      insertMessage(fixtureDb, { id: 'mc', sessionId: 's1', role: 'assistant', summary: true });
+      // reasoning + step parts are skipped; the text part carries the summary.
+      insertPart(fixtureDb, {
+        id: 'prt_r',
+        messageId: 'mc',
+        sessionId: 's1',
+        data: { type: 'reasoning', text: 'meta reasoning about summarizing' },
+      });
+      insertPart(fixtureDb, {
+        id: 'prt_s',
+        messageId: 'mc',
+        sessionId: 's1',
+        data: { type: 'text', text: '## Goal\n- Rule on findings' },
+      });
+      const source = new OpenCodeSource(fixtureDb);
+      const items = source.readTranscript('s1');
+      expect(items).toHaveLength(1);
+      expect(items[0]!.compaction).toEqual({ summary: '## Goal\n- Rule on findings' });
+      expect(items[0]!.text).toBe('');
+      expect(items[0]).toMatchObject({ filePath: 'opencode://s1', lineNumbers: [2] });
+    });
+  });
+
+  it('does not index the text of a summary:true (compaction) message', () => {
+    insertMessage(fixtureDb, { id: 'mc', sessionId: 'sc', role: 'assistant', summary: true });
+    insertPart(fixtureDb, {
+      id: 'prt_sc',
+      messageId: 'mc',
+      sessionId: 'sc',
+      data: { type: 'text', text: '## Goal\n- machine-generated recap' },
+    });
+
+    const source = new OpenCodeSource(fixtureDb);
+    const count = source.index(store);
+
+    expect(count).toBe(0);
+    expect(store.getSessionChunks('sc')).toHaveLength(0);
   });
 });

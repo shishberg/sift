@@ -5,7 +5,10 @@
  * and converts them into the common Chunk shape for indexing.
  *
  * opencode data model:
- *   message  — one per turn; JSON `data` field carries `role` (user | assistant)
+ *   message  — one per turn; JSON `data` field carries `role` (user | assistant).
+ *              A post-compaction summary message also carries `summary: true`
+ *              (mode/agent 'compaction'); its text part is a machine-generated
+ *              recap — rendered as a collapsible compaction block, not indexed.
  *   part     — one or more per message; JSON `data` field carries `type`:
  *              'text'        → text chunk (role from parent message)
  *              'tool'        → tool chunk (name from .tool, args from .state.input,
@@ -185,12 +188,18 @@ export class OpenCodeSource {
       .all(...messageIds) as MessageRow[];
 
     const roleByMessageId = new Map<string, 'user' | 'assistant'>();
+    // opencode flags a post-compaction summary message with summary:true
+    // (mode/agent 'compaction'). It is a machine-generated recap that duplicates
+    // content already in the log, so we skip indexing its parts (still rendered
+    // as a collapsible compaction block — see readTranscript).
+    const compactionMessageIds = new Set<string>();
     for (const msg of messages) {
       try {
-        const parsed = JSON.parse(msg.data) as { role?: string };
+        const parsed = JSON.parse(msg.data) as { role?: string; summary?: unknown };
         if (parsed.role === 'user' || parsed.role === 'assistant') {
           roleByMessageId.set(msg.id, parsed.role);
         }
+        if (parsed.summary === true) compactionMessageIds.add(msg.id);
       } catch {
         // Malformed JSON — skip silently.
       }
@@ -220,6 +229,9 @@ export class OpenCodeSource {
         // out-of-range or invalid time_created — fall back to empty string
         timestamp = '';
       }
+      // Skip every part of a compaction summary message — not indexed.
+      if (compactionMessageIds.has(part.message_id)) continue;
+
       // Default to 'assistant' if the message role is unknown (defensive).
       const role = roleByMessageId.get(part.message_id) ?? 'assistant';
 
@@ -308,10 +320,14 @@ export class OpenCodeSource {
       .prepare(`SELECT id, data FROM message WHERE id IN (${placeholders})`)
       .all(...messageIds) as Array<{ id: string; data: string }>;
     const roleByMessageId = new Map<string, 'user' | 'assistant'>();
+    // A summary:true message is a post-compaction recap (mode/agent 'compaction');
+    // its text part is rendered as a collapsible compaction block, not a bubble.
+    const compactionMessageIds = new Set<string>();
     for (const msg of messages) {
       try {
-        const parsed = JSON.parse(msg.data) as { role?: string };
+        const parsed = JSON.parse(msg.data) as { role?: string; summary?: unknown };
         if (parsed.role === 'user' || parsed.role === 'assistant') roleByMessageId.set(msg.id, parsed.role);
+        if (parsed.summary === true) compactionMessageIds.add(msg.id);
       } catch {
         // skip
       }
@@ -335,6 +351,17 @@ export class OpenCodeSource {
         timestamp = '';
       }
       const role = roleByMessageId.get(part.message_id) ?? 'assistant';
+
+      // Compaction summary message: emit its text part(s) as a compaction block.
+      if (compactionMessageIds.has(part.message_id)) {
+        if (type === 'text') {
+          const text = typeof parsed['text'] === 'string' ? (parsed['text'] as string) : '';
+          if (text) {
+            items.push({ role, text: '', compaction: { summary: text }, filePath, lineNumbers: [part.rowid], timestamp });
+          }
+        }
+        continue; // skip reasoning/step/other parts of the compaction message
+      }
 
       if (type === 'text') {
         const text = typeof parsed['text'] === 'string' ? (parsed['text'] as string) : '';

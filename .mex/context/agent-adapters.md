@@ -120,8 +120,15 @@ compaction event so the web view can show a collapsible block instead of a giant
 message bubble. A compaction item is `{role:'user', text:'', compaction:
 CompactionDetail, filePath, lineNumbers, timestamp}` (role is a placeholder; the
 view branches on `item.compaction` before tool/message). `CompactionDetail` =
-`{summary: string, tokensBefore?: number, trigger?: string}`. This is render-only
-— indexing/adapters and the search index are untouched.
+`{summary: string, tokensBefore?: number, trigger?: string}`.
+
+Compaction summaries are also EXCLUDED from the search index (adapters/source),
+not just specially rendered: they are machine-generated recaps that duplicate
+content already in the log. claude (`src/adapters/claude.ts`: skip
+`isCompactSummary === true`) and opencode (`src/sources/opencode.ts`: skip all
+parts of a `summary:true` message, in both `index()` and `readTranscript`).
+codex and pi never indexed theirs — their compaction record types aren't in
+those adapters' indexed-type sets.
 
 Per-agent markers (verified against real logs):
 - **claude** — two adjacent records: a `{type:'system',
@@ -138,6 +145,10 @@ Per-agent markers (verified against real logs):
   boundary-only item `{summary:''}` (codex records no clean summary). The
   separate `event_msg`/`payload.type:'context_compacted'` marker is ignored to
   avoid double-counting.
+- **opencode** — an assistant `message` with `summary:true` (mode/agent
+  'compaction'); its `text` part holds the recap. `readTranscript` emits one
+  compaction item `{summary: text}` (no tokens/trigger — opencode records none)
+  and skips the message's reasoning/step parts. `index()` skips all its parts.
 
 ## Out of scope
 - Hooks-based ingestion — kept open as a future per-agent capability, but adapters
