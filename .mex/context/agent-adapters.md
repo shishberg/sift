@@ -105,11 +105,14 @@ Per agent (surveyed 2026-06-28):
   `src/adapters/claude.ts` + `src/render/claude.ts`.
 - **codex** — preamble blocks injected into the first user turn:
   `<environment_context>` (cwd/shell/date), `<collaboration_mode>`,
-  `<skills_instructions>` → all `drop`. The AGENTS.md/`<INSTRUCTIONS>` project
-  preamble is deliberately KEPT (real content). Wired into
-  `src/adapters/codex.ts` + `src/render/codex.ts`. Note: the nested env tags
-  (`cwd`, `shell`) are removed as part of the dropped block, NOT registered
-  individually — they're too generic to strip on their own.
+  `<skills_instructions>` → all `drop`. The AGENTS.md project preamble codex
+  injects as `<INSTRUCTIONS>` is also `drop` (by request — it's the project's own
+  AGENTS.md, a file already on disk, not conversation); the plain
+  `# AGENTS.md instructions for <path>` header line that labels it sits outside
+  the tag and is stripped by a dedicated regex (`AGENTS_MD_HEADER`) in
+  `stripHarnessTags`. Wired into `src/adapters/codex.ts` + `src/render/codex.ts`.
+  Note: the nested env tags (`cwd`, `shell`) are removed as part of the dropped
+  block, NOT registered individually — they're too generic to strip on their own.
 - **pi** — clean. No injected wrapper tags (stray `<command-name>` hits were file
   content inside tool results, not annotations). Not wired.
 - **opencode** — clean. No systematic wrapper tags. Not wired.

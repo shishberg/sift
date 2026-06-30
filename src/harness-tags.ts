@@ -34,12 +34,27 @@ export const HARNESS_TAGS: Record<string, TagStrategy> = {
   'local-command-caveat': 'drop',
 
   // Codex preamble blocks injected into the first user turn (machine context and
-  // harness settings — not conversation). The AGENTS.md/<INSTRUCTIONS> project
-  // preamble is deliberately NOT listed: it's real content worth searching.
+  // harness settings — not conversation).
   'environment_context': 'drop',
   'collaboration_mode': 'drop',
   'skills_instructions': 'drop',
 };
+
+/**
+ * Codex injects the project's AGENTS.md into the first user turn as a plain
+ * "# AGENTS.md instructions for <path>" header line followed by an
+ * <INSTRUCTIONS>…</INSTRUCTIONS> block. Excluded from index + render by request:
+ * it's the project's own AGENTS.md (a file already on disk), not conversation.
+ *
+ * Matched as the header+block PAIR, NOT by registering `INSTRUCTIONS` as a drop
+ * tag: `<INSTRUCTIONS>` is a common prompt-wrapper name, so a blanket drop would
+ * silently delete real user-authored content. Requiring the AGENTS.md header
+ * immediately before the block keeps the match codex-preamble-specific; a bare
+ * `<INSTRUCTIONS>` block in someone's message is left untouched. Non-global: the
+ * preamble appears once, at the very start of the turn.
+ */
+const AGENTS_MD_PREAMBLE =
+  /^[ \t]*#[ \t]*AGENTS\.md instructions for [^\n]*\n\s*<INSTRUCTIONS\b[^>]*>[\s\S]*?<\/INSTRUCTIONS>[ \t]*\n?/m;
 
 const TAG_NAMES = Object.keys(HARNESS_TAGS);
 const TAG_ALTERNATION = TAG_NAMES.join('|');
@@ -54,9 +69,17 @@ const DROP_NAMES = TAG_NAMES.filter((t) => HARNESS_TAGS[t] === 'drop').join('|')
  * input unchanged) unless the text actually contains a registry tag.
  */
 export function stripHarnessTags(text: string): string {
-  if (!text || !ANY_TAG.test(text)) return text;
+  if (!text) return text;
+  const hasPreamble = AGENTS_MD_PREAMBLE.test(text);
+  if (!ANY_TAG.test(text) && !hasPreamble) return text;
 
   let out = text;
+
+  // 0. Remove the codex AGENTS.md preamble (header line + <INSTRUCTIONS> block) as
+  //    one unit, before the generic tag logic. No-op when the pair is absent.
+  if (hasPreamble) {
+    out = out.replace(AGENTS_MD_PREAMBLE, '');
+  }
 
   // 1. Drop boilerplate elements (tags + inner content). `[\s\S]` spans newlines.
   if (DROP_NAMES) {

@@ -61,6 +61,33 @@ describe('stripHarnessTags', () => {
     ).toBe('');
   });
 
+  it('drops the codex AGENTS.md <INSTRUCTIONS> block and its header line', () => {
+    const input =
+      '# AGENTS.md instructions for /Users/agent/src/agent-search\n\n' +
+      '<INSTRUCTIONS>\n## Communication\n\nBe direct.\n</INSTRUCTIONS>';
+    expect(stripHarnessTags(input)).toBe('');
+  });
+
+  it('drops the AGENTS.md preamble but keeps a following real user message', () => {
+    const input =
+      '# AGENTS.md instructions for /Users/agent/src/agent-search\n\n' +
+      '<INSTRUCTIONS>\nproject rules\n</INSTRUCTIONS>\n\nNow fix the bug in foo.ts';
+    expect(stripHarnessTags(input)).toBe('Now fix the bug in foo.ts');
+  });
+
+  it('keeps a "# AGENTS.md instructions" line that is not the codex "for <path>" header', () => {
+    // Only the exact codex header ("… for <path>") is stripped; arbitrary prose is kept.
+    const input = '# AGENTS.md instructions\n\nuse TDD\n\n<environment_context>x</environment_context>';
+    expect(stripHarnessTags(input)).toBe('# AGENTS.md instructions\n\nuse TDD');
+  });
+
+  it('keeps a bare user-authored <INSTRUCTIONS> block (no AGENTS.md header)', () => {
+    // INSTRUCTIONS is a common prompt wrapper; only the codex AGENTS.md preamble
+    // (header + block pair) is stripped, never a standalone block.
+    const input = '<INSTRUCTIONS>keep me, I am the user speaking</INSTRUCTIONS>';
+    expect(stripHarnessTags(input)).toBe(input);
+  });
+
   it('keeps surrounding content when dropping a codex preamble block', () => {
     const input =
       '# AGENTS.md instructions\n\nuse TDD\n\n' +
