@@ -23,11 +23,25 @@ export interface ToolDetail {
   isError?: boolean;
 }
 
-/** Mirror of backend TranscriptItem (faithful, log-derived). */
+/** Mirror of backend CompactionDetail — a conversation-compaction event. */
+export interface CompactionDetail {
+  /** Human-readable summary of the compacted-away conversation. '' when the agent records none (e.g. codex). */
+  summary: string;
+  /** Approx token count before compaction, when the log records it. */
+  tokensBefore?: number;
+  /** What triggered it (e.g. 'manual', 'auto', 'hook'), when known. */
+  trigger?: string;
+}
+
+/**
+ * Mirror of backend TranscriptItem (faithful, log-derived). A compaction item
+ * carries `compaction` (role is a placeholder 'user', text '').
+ */
 export interface TranscriptItem {
   role: 'user' | 'assistant' | 'tool';
   text: string;
   tool?: ToolDetail;
+  compaction?: CompactionDetail;
   filePath: string;
   lineNumbers: number[];
   timestamp: string;

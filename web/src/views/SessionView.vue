@@ -6,6 +6,7 @@ import { renderMarkdown } from '@/lib/markdown';
 import { sessionHeader, resetSessionHeader } from '@/lib/sessionHeader';
 import { Message, MessageContent } from '@/components/ai-elements/message';
 import { Tool, ToolHeader, ToolContent, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
+import { Compaction, CompactionHeader, CompactionContent } from '@/components/ai-elements/compaction';
 
 const route = useRoute();
 
@@ -102,9 +103,21 @@ onUnmounted(() => {
 
     <div v-if="!loading && !error && session" class="flex flex-col" style="gap: 16px">
       <template v-for="(item, index) in session.items" :key="itemKey(item) + ':' + index">
+        <!-- Compaction event (role is a placeholder; branch on `compaction` first) -->
+        <div
+          v-if="item.compaction"
+          :data-matched="isMatch(item) ? '' : undefined"
+          :class="['transcript-row', isMatch(item) ? 'chunk-matched' : '']"
+        >
+          <Compaction :default-open="isMatch(item)">
+            <CompactionHeader :trigger="item.compaction.trigger" :tokens-before="item.compaction.tokensBefore" />
+            <CompactionContent :summary="item.compaction.summary" />
+          </Compaction>
+        </div>
+
         <!-- Tool call -->
         <div
-          v-if="item.role === 'tool'"
+          v-else-if="item.role === 'tool'"
           :data-matched="isMatch(item) ? '' : undefined"
           :class="['transcript-row', isMatch(item) ? 'chunk-matched' : '']"
         >

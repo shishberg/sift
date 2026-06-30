@@ -21,7 +21,7 @@ edges:
   - target: context/agent-adapters.md
     condition: when adding an agent or touching agent-specific parsing
 last_updated: 2026-06-30
-web_layout_updated: 2026-06-28
+web_layout_updated: 2026-06-30
 embed_providers_updated: 2026-06-30
 compaction_render_updated: 2026-06-30
 ---
@@ -40,8 +40,9 @@ See `context/impl-spec.md` for the concrete build and `context/decisions.md` for
 **Latest:** the faithful renderer (`src/render/`) now emits a dedicated
 compaction `TranscriptItem` (`compaction?: CompactionDetail`) per agent
 compaction event — claude/pi/codex each have a marker (see
-`context/agent-adapters.md`). Render-only; the web view branch on
-`item.compaction` is a follow-up frontend task.
+`context/agent-adapters.md`). The web session view now renders these as a
+collapsible "Compaction" block (`web/src/components/ai-elements/compaction/`),
+collapsed by default, styled like the tool block.
 
 **Working (all verified end-to-end against real logs, ~35k chunks):**
 - chokidar watcher over the agent session dirs (dirs derived from adapter `rootDir`s)
@@ -93,7 +94,9 @@ compaction event — claude/pi/codex each have a marker (see
   index only supplies which files belong to a session (`store.getSessionFiles`) + cwd. The view
   renders these with vendored ai-elements `Message` bubbles (user right / assistant left, keeping
   the existing colours, markdown-it for prose) and collapsible `Tool` blocks (paired
-  input/output, open on match); it scrolls to and ring-highlights the matched item. On a session
+  input/output, open on match) and collapsible `Compaction` blocks (branch on
+  `item.compaction` before the tool/message branches; header shows trigger + "~N tokens",
+  body renders the summary as markdown); it scrolls to and ring-highlights the matched item. On a session
   page the global header hosts the session controls (agent / session id + copy / working
   dir + copy-log-path; no back button — the sidebar is always present) via a shared
   `sessionHeader` store. Live queue Progress bar polls `/api/status`. Copy buttons go through

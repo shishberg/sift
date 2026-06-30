@@ -308,6 +308,18 @@ body {
   color: #991b1b;
 }
 
+/* Compaction block reuses the tool-block look; these just style its extras. */
+.compaction-detail {
+  font-size: 11px;
+  color: var(--muted-fg);
+}
+.compaction-empty {
+  font-size: 13px;
+  color: var(--muted-fg);
+  font-style: italic;
+  padding: 8px 0 4px;
+}
+
 /* ── Rendered markdown body ─────────────────────────────────────────────── */
 .md-body {
   font-size: 14px;
