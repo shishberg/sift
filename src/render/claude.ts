@@ -9,6 +9,9 @@ import { stripHarnessTags } from '../harness-tags.js';
 export function parseClaudeTranscript(lines: string[], filePath: string): TranscriptItem[] {
   const items: TranscriptItem[] = [];
   const toolIndexById = new Map<string, number>();
+  // Stashed metadata from a compact_boundary record, consumed by the summary
+  // record that follows it.
+  let pendingCompaction: { trigger?: string; tokensBefore?: number } | undefined;
 
   lines.forEach((line, i) => {
     const lineNumber = i + 1;
@@ -23,11 +26,48 @@ export function parseClaudeTranscript(lines: string[], filePath: string): Transc
     }
 
     const type = record['type'];
+
+    if (type === 'system' && record['subtype'] === 'compact_boundary') {
+      const meta = record['compactMetadata'] as Record<string, unknown> | undefined;
+      pendingCompaction = {
+        trigger: meta?.['trigger'] as string | undefined,
+        tokensBefore: meta?.['preTokens'] as number | undefined,
+      };
+      return;
+    }
+
     if (type !== 'user' && type !== 'assistant') return;
 
     const timestamp = (record['timestamp'] as string | undefined) ?? '';
     const message = record['message'] as { role?: string; content?: unknown } | undefined;
     if (!message) return;
+
+    if (record['isCompactSummary'] === true) {
+      const content = message.content;
+      const summary =
+        typeof content === 'string'
+          ? content
+          : Array.isArray(content)
+            ? (content as Record<string, unknown>[])
+                .filter((b) => b['type'] === 'text')
+                .map((b) => (b['text'] as string | undefined) ?? '')
+                .join('')
+            : '';
+      items.push({
+        role: 'user',
+        text: '',
+        compaction: {
+          summary,
+          tokensBefore: pendingCompaction?.tokensBefore,
+          trigger: pendingCompaction?.trigger,
+        },
+        filePath,
+        lineNumbers: [lineNumber],
+        timestamp,
+      });
+      pendingCompaction = undefined;
+      return;
+    }
     const role = message.role === 'user' ? 'user' : 'assistant';
     const content = message.content;
 

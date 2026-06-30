@@ -28,6 +28,19 @@ export function parseCodexTranscript(lines: string[], filePath: string): Transcr
     } catch {
       return;
     }
+    if (record['type'] === 'compacted') {
+      // Codex records no clean summary text (message is empty; replacement_history
+      // is the rebuilt history, not a summary). Emit a boundary-only marker.
+      items.push({
+        role: 'user',
+        text: '',
+        compaction: { summary: '' },
+        filePath,
+        lineNumbers: [lineNumber],
+        timestamp: (record['timestamp'] as string | undefined) ?? '',
+      });
+      return;
+    }
     if (record['type'] !== 'response_item') return;
 
     const payload = record['payload'] as Record<string, unknown> | undefined;

@@ -66,4 +66,28 @@ describe('parseCodexTranscript', () => {
     );
     expect(items[0].tool?.output).toBe('[{"type":"input_image","image_url":"data:..."}]');
   });
+
+  it('emits a boundary-only compaction item from a compacted record', () => {
+    const items = parseCodexTranscript(
+      lines(
+        { type: 'response_item', timestamp: 't1', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'before' }] } },
+        { type: 'compacted', timestamp: 't2', payload: { message: '', replacement_history: [{ x: 1 }] } },
+        { type: 'response_item', timestamp: 't3', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'after' }] } },
+      ),
+      FP,
+    );
+    expect(items.map((i) => i.role)).toEqual(['user', 'user', 'assistant']);
+    expect(items[1].compaction).toEqual({ summary: '' });
+    expect(items[1].text).toBe('');
+    expect(items[1].lineNumbers).toEqual([2]);
+    expect(items[1].timestamp).toBe('t2');
+  });
+
+  it('ignores the event_msg context_compacted marker', () => {
+    const items = parseCodexTranscript(
+      lines({ type: 'event_msg', timestamp: 't1', payload: { type: 'context_compacted' } }),
+      FP,
+    );
+    expect(items).toEqual([]);
+  });
 });

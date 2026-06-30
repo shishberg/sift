@@ -23,6 +23,7 @@ edges:
 last_updated: 2026-06-30
 web_layout_updated: 2026-06-28
 embed_providers_updated: 2026-06-30
+compaction_render_updated: 2026-06-30
 ---
 
 # Session Bootstrap
@@ -33,8 +34,14 @@ Then read this file fully before doing anything else in this session.
 
 ## Current Project State
 
-**V1 is built and working.** Implemented via TDD, on `main`, 429 tests passing.
+**V1 is built and working.** Implemented via TDD, on `main`, 465 tests passing.
 See `context/impl-spec.md` for the concrete build and `context/decisions.md` for the why.
+
+**Latest:** the faithful renderer (`src/render/`) now emits a dedicated
+compaction `TranscriptItem` (`compaction?: CompactionDetail`) per agent
+compaction event — claude/pi/codex each have a marker (see
+`context/agent-adapters.md`). Render-only; the web view branch on
+`item.compaction` is a follow-up frontend task.
 
 **Working (all verified end-to-end against real logs, ~35k chunks):**
 - chokidar watcher over the agent session dirs (dirs derived from adapter `rootDir`s)

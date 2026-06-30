@@ -35,4 +35,25 @@ describe('parsePiTranscript', () => {
     );
     expect(items[0].tool).toEqual({ name: 'bash', input: '{}', output: 'boom', isError: true });
   });
+
+  it('emits a compaction item from a compaction record', () => {
+    const items = parsePiTranscript(
+      lines({ type: 'compaction', summary: '## Goal\nstuff', tokensBefore: 98744, fromHook: false, details: {}, timestamp: 't1' }),
+      FP,
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].role).toBe('user');
+    expect(items[0].text).toBe('');
+    expect(items[0].compaction).toEqual({ summary: '## Goal\nstuff', tokensBefore: 98744, trigger: undefined });
+    expect(items[0].lineNumbers).toEqual([1]);
+    expect(items[0].timestamp).toBe('t1');
+  });
+
+  it('sets trigger to hook when fromHook is true', () => {
+    const items = parsePiTranscript(
+      lines({ type: 'compaction', summary: 's', tokensBefore: 10, fromHook: true, timestamp: 't1' }),
+      FP,
+    );
+    expect(items[0].compaction).toEqual({ summary: 's', tokensBefore: 10, trigger: 'hook' });
+  });
 });

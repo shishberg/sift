@@ -18,6 +18,7 @@ edges:
   - target: patterns/add-agent-adapter.md
     condition: when actually adding support for a new agent type
 last_updated: 2026-06-30
+compaction_render_updated: 2026-06-30
 ---
 
 # Agent Adapters
@@ -112,6 +113,31 @@ Per agent (surveyed 2026-06-28):
 - **pi** — clean. No injected wrapper tags (stray `<command-name>` hits were file
   content inside tool results, not annotations). Not wired.
 - **opencode** — clean. No systematic wrapper tags. Not wired.
+
+## Conversation-compaction markers (render-only)
+The faithful renderer (`src/render/`) emits a dedicated compaction item per
+compaction event so the web view can show a collapsible block instead of a giant
+message bubble. A compaction item is `{role:'user', text:'', compaction:
+CompactionDetail, filePath, lineNumbers, timestamp}` (role is a placeholder; the
+view branches on `item.compaction` before tool/message). `CompactionDetail` =
+`{summary: string, tokensBefore?: number, trigger?: string}`. This is render-only
+— indexing/adapters and the search index are untouched.
+
+Per-agent markers (verified against real logs):
+- **claude** — two adjacent records: a `{type:'system',
+  subtype:'compact_boundary', compactMetadata:{trigger, preTokens}}` boundary,
+  then a `{type:'user', isCompactSummary:true, message:{content}}` summary. The
+  parser stashes the boundary metadata, then on the summary record emits ONE
+  compaction item (summary = the user message text joined as normal but NOT
+  run through `stripHarnessTags` — it's synthetic; tokensBefore = preTokens;
+  trigger = trigger) and does NOT also emit a plain user bubble. A boundary with
+  no following summary is tolerated (no crash).
+- **pi** — `{type:'compaction', summary, tokensBefore, fromHook}` →
+  `{summary, tokensBefore, trigger: fromHook ? 'hook' : undefined}`.
+- **codex** — `{type:'compacted', payload:{message:'', replacement_history}}` →
+  boundary-only item `{summary:''}` (codex records no clean summary). The
+  separate `event_msg`/`payload.type:'context_compacted'` marker is ignored to
+  avoid double-counting.
 
 ## Out of scope
 - Hooks-based ingestion — kept open as a future per-agent capability, but adapters

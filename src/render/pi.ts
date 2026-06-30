@@ -20,9 +20,26 @@ export function parsePiTranscript(lines: string[], filePath: string): Transcript
     } catch {
       return;
     }
+    const timestamp = (record['timestamp'] as string | undefined) ?? '';
+
+    if (record['type'] === 'compaction') {
+      items.push({
+        role: 'user',
+        text: '',
+        compaction: {
+          summary: (record['summary'] as string | undefined) ?? '',
+          tokensBefore: record['tokensBefore'] as number | undefined,
+          trigger: record['fromHook'] === true ? 'hook' : undefined,
+        },
+        filePath,
+        lineNumbers: [lineNumber],
+        timestamp,
+      });
+      return;
+    }
+
     if (record['type'] !== 'message') return;
 
-    const timestamp = (record['timestamp'] as string | undefined) ?? '';
     const message = record['message'] as Record<string, unknown> | undefined;
     if (!message) return;
     const role = message['role'] as string | undefined;
