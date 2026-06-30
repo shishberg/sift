@@ -99,12 +99,15 @@ OPTIONS
   -h, --help    Show this help.
 
 EMBEDDING
-  Embeddings are generated LOCALLY (never a cloud API). Two providers, chosen
+  Embeddings are generated LOCALLY (never a cloud API). Three providers, chosen
   via AGENT_SEARCH_EMBED_PROVIDER:
-    ollama    (default) nomic-embed-text, 768 dims. Needs a running ollama:
-                ollama serve
-    fastembed in-process ONNX (bge-base-en-v1.5, 768 dims), no service. Needs
-              the optional package once: npm install fastembed
+    ollama       (default) nomic-embed-text, 768 dims. Needs a running ollama
+                 (ollama serve); uses the GPU where ollama supports it.
+    fastembed    in-process ONNX on CPU (bge-base-en-v1.5, 768 dims), no
+                 service, no GPU. Install once: npm install fastembed
+    transformers in-process transformers.js with device=webgpu (bge-base-en-v1.5,
+                 768 dims). Falls back to CPU under plain Node (no WebGPU).
+                 Install once: npm install @huggingface/transformers
   Switching provider changes the model, so reindex from scratch after changing.
 `.trim();
 

@@ -4,8 +4,9 @@ Search your AI agent session logs from one place. sift indexes the conversation
 logs from Claude, Codex, pi, and opencode into a single local SQLite hybrid
 index (vector + full-text) and lets you search them from a CLI or a web app.
 
-- **Local only** — embeddings run locally (via [ollama](https://ollama.com) or
-  in-process [fastembed](https://github.com/Anush008/fastembed-js)); nothing is
+- **Local only** — embeddings run locally (via [ollama](https://ollama.com),
+  in-process [fastembed](https://github.com/Anush008/fastembed-js), or in-process
+  [transformers.js](https://github.com/huggingface/transformers.js)); nothing is
   sent to a cloud API.
 - **Read-only** — sift never modifies the agents' log files. They stay the
   source of truth.
@@ -30,14 +31,21 @@ with `AGENT_SEARCH_EMBED_PROVIDER`:
 
 | Provider | Model | How it runs |
 | --- | --- | --- |
-| `ollama` (default) | `nomic-embed-text` (768 dims) | Talks to a local ollama service (`ollama serve`). Pull the model first: `ollama pull nomic-embed-text`. |
-| `fastembed` | `bge-base-en-v1.5` (768 dims) | In-process ONNX — no separate service. Install the optional package once (`npm install fastembed`); the model downloads to `~/.sift/fastembed` on first use. |
+| `ollama` (default) | `nomic-embed-text` (768 dims) | Talks to a local ollama service (`ollama serve`). Pull the model first: `ollama pull nomic-embed-text`. Uses the GPU where ollama supports it (e.g. Metal on Apple Silicon). |
+| `fastembed` | `bge-base-en-v1.5` (768 dims) | In-process ONNX on the **CPU** — no service, no GPU needed. Install the optional package once (`npm install fastembed`); the model downloads to `~/.sift/fastembed` on first use. |
+| `transformers` | `Xenova/bge-base-en-v1.5` (768 dims) | In-process [transformers.js](https://github.com/huggingface/transformers.js) with `device: "webgpu"` for GPU acceleration. WebGPU needs a WebGPU-capable runtime (browser/Electron); under plain Node there is no `navigator.gpu`, so it **falls back to CPU** (with a one-time warning). Install once (`npm install @huggingface/transformers`); caches to `~/.sift/transformers`. |
 
 ```sh
 export AGENT_SEARCH_EMBED_PROVIDER=fastembed
 npm install fastembed   # optional dependency, installed by default with `npm install`
 sift index              # reindex — see below
 ```
+
+The `transformers` provider can run fully offline against a locally stored
+model — set `AGENT_SEARCH_TRANSFORMERS_LOCAL_ONLY=1` (no network fetch), and
+optionally `AGENT_SEARCH_TRANSFORMERS_MODEL_PATH=/path/to/models` pointing at a
+directory that contains the model under its id (e.g.
+`/path/to/models/Xenova/bge-base-en-v1.5/`).
 
 The index records which model built it. Switching providers (or models) changes
 the embedding space, so sift refuses to mix them — delete the index and reindex:
@@ -96,10 +104,15 @@ VITE_HOST=0.0.0.0 VITE_ALLOWED_HOSTS=my-host.local npm run web:dev
 | Variable | Purpose |
 | --- | --- |
 | `SIFT_DB` | Path to the SQLite index file (default `~/.sift/index.db`). |
-| `AGENT_SEARCH_EMBED_PROVIDER` | Embedding provider: `ollama` (default) or `fastembed`. See [Embedding providers](#embedding-providers). |
-| `AGENT_SEARCH_EMBED_MODEL` | Override the model for the chosen provider (`nomic-embed-text`; or `bge-base-en-v1.5` / `bge-base-en` for fastembed). Must be 768 dims. |
+| `AGENT_SEARCH_EMBED_PROVIDER` | Embedding provider: `ollama` (default), `fastembed`, or `transformers`. See [Embedding providers](#embedding-providers). |
+| `AGENT_SEARCH_EMBED_MODEL` | Override the model for the chosen provider (`nomic-embed-text`; or `bge-base-en-v1.5` / `bge-base-en` for fastembed/transformers). Must be 768 dims. |
 | `OLLAMA_BASE_URL` | ollama endpoint (default `http://localhost:11434`). |
 | `FASTEMBED_CACHE_DIR` | Where fastembed caches model files (default `~/.sift/fastembed`). |
+| `AGENT_SEARCH_TRANSFORMERS_DEVICE` | transformers.js device: `webgpu` (default) or `cpu`. |
+| `AGENT_SEARCH_TRANSFORMERS_DTYPE` | transformers.js weight dtype (default `fp32`; e.g. `q8`, `fp16`). |
+| `AGENT_SEARCH_TRANSFORMERS_LOCAL_ONLY` | Truthy = forbid network fetch; load the model from disk only. |
+| `AGENT_SEARCH_TRANSFORMERS_MODEL_PATH` | Base directory holding a local transformers.js model (implies local-only). |
+| `AGENT_SEARCH_TRANSFORMERS_CACHE` | Where transformers.js caches models (default `~/.sift/transformers`). |
 | `AGENT_SEARCH_DIRS` | Colon-separated dirs to watch, overriding the defaults (`~/.claude/projects/`, `~/.codex/sessions/`, `~/.pi/agent/sessions/`). `~` is expanded. opencode is read from its own SQLite DB. |
 | `AGENT_SEARCH_PORT` | Port for `serve` (default 3737; `--port` also works). |
 | `NO_COLOR` | Disables ANSI colour in CLI search output. |
