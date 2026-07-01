@@ -446,6 +446,16 @@ describe('Store', () => {
       expect(rows.map((r) => r.sessionId)).toEqual(['short-new', 'long-old']);
     });
 
+    it('breaks a cross-session timestamp tie deterministically by session_id', () => {
+      // Two sessions whose latest messages share the exact same timestamp must
+      // come back in a stable order (session_id asc), not arbitrary SQLite order.
+      store.addChunk(makeChunk({ sessionId: 'sb', lineNumber: 1, text: 'b', timestamp: '2026-01-01T00:00:09Z' }));
+      store.addChunk(makeChunk({ sessionId: 'sa', lineNumber: 1, text: 'a', timestamp: '2026-01-01T00:00:09Z' }));
+
+      const rows = store.recentSessions();
+      expect(rows.map((r) => r.sessionId)).toEqual(['sa', 'sb']);
+    });
+
     it('uses the most recent message as the snippet and its locator', () => {
       store.addChunk(makeChunk({ sessionId: 's1', lineNumber: 1, text: 'old', timestamp: '2026-01-01T00:00:01Z' }));
       store.addChunk(makeChunk({ sessionId: 's1', lineNumber: 7, text: 'newest', timestamp: '2026-01-01T00:00:09Z' }));

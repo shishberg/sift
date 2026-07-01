@@ -328,7 +328,11 @@ export class Store {
     // contains both text and tool_use blocks; the text block is pushed first,
     // so id asc surfaces the text, not the tool). Within a session the max-line
     // chunk also carries the max timestamp (append-only log), so top.ts matches
-    // the fetched chunk's timestamp. The correlated subquery resolves cwd like
+    // the fetched chunk's timestamp. On a cross-session timestamp tie both the
+    // `top` cut and the final sort break the tie by `session_id` (same key, same
+    // direction) so the list order is deterministic — no reload flicker. The
+    // within-session latest-chunk pick below is independent: it's always
+    // line_number DESC, id ASC, never timestamp. The correlated subquery resolves cwd like
     // getSessionCwd. (A ROW_NUMBER() window over all chunks did the same thing
     // but took ~60s on a 195k-row index — see chunks_session_line_ts_idx.)
     this.stmtRecentSessions = this.db.prepare(`
@@ -336,7 +340,7 @@ export class Store {
         SELECT session_id, MAX(timestamp) AS ts
         FROM   chunks
         GROUP  BY session_id
-        ORDER  BY ts DESC
+        ORDER  BY ts DESC, session_id
         LIMIT  ?
       )
       SELECT
@@ -360,7 +364,7 @@ export class Store {
         ORDER BY line_number DESC, id ASC
         LIMIT 1
       )
-      ORDER BY c.timestamp DESC
+      ORDER BY c.timestamp DESC, c.session_id
     `);
 
     // ---- transactions ----
