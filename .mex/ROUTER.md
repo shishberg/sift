@@ -20,11 +20,13 @@ edges:
     condition: when working on querying, ranking, or how results are returned
   - target: context/agent-adapters.md
     condition: when adding an agent or touching agent-specific parsing
-last_updated: 2026-06-30
+last_updated: 2026-07-01
 web_layout_updated: 2026-06-30
 recent_sessions_sql_updated: 2026-06-30
 embed_providers_updated: 2026-06-30
 compaction_render_updated: 2026-06-30
+index_lock_added: 2026-07-01
+graceful_shutdown_deadline_added: 2026-07-01
 ---
 
 # Session Bootstrap
@@ -90,6 +92,13 @@ collapsed by default, styled like the tool block.
   claude adapter emits two chunks at the same `lineNumber`+`timestamp` for an assistant message
   with both `text` and `tool_use` blocks, and the text block must surface as the "latest message"
   (not the tool).
+  **Index lock:** `Store` takes a process-level lock on `<dbPath>.lock` (PID file with stale-PID
+  recovery via `process.kill(pid, 0)`) so `sift index --delete` can't race with a running
+  `sift watch` / `sift serve --watch` and silently produce a split-brain index. Read-only commands
+  (`sift search`, `sift show`, `sift status`, `sift serve` without `--watch`) pass `readOnly: true`
+  to skip the lock — SQLite WAL handles concurrent readers. **Graceful shutdown** is bounded by
+  `gracefulShutdown()` (5s deadline) so the SIGINT handler doesn't hang waiting for an in-flight
+  `/api/status` long-poll to drain — exit 130 on timeout, 1 on step failure, 0 on success.
   The search box shows an `X` clear
   button while a query is present; clearing drops `q` and reverts to the recent list. `/` shows
   a welcome placeholder (`web/src/views/SearchView.vue`); `/session/:id` shows the transcript. The

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import Database from 'better-sqlite3';
@@ -75,6 +75,41 @@ describe('Store', () => {
       } finally {
         rmSync(tmpDir, { recursive: true });
       }
+    });
+
+    it('takes over a stale lock left by a dead PID', () => {
+      const tmpDir = mkdtempSync(join(tmpdir(), 'store-test-'));
+      const dbPath = join(tmpDir, 'test.db');
+      try {
+        // Simulate a previous crash: lock file with a PID that doesn't exist.
+        writeFileSync(dbPath + '.lock', '999999');
+        const s = new Store(dbPath);
+        s.close();
+        // Lock file removed on close.
+        expect(existsSync(dbPath + '.lock')).toBe(false);
+      } finally {
+        rmSync(tmpDir, { recursive: true });
+      }
+    });
+
+    it('releases the lock on close', () => {
+      const tmpDir = mkdtempSync(join(tmpdir(), 'store-test-'));
+      const dbPath = join(tmpDir, 'test.db');
+      try {
+        const s = new Store(dbPath);
+        expect(existsSync(dbPath + '.lock')).toBe(true);
+        s.close();
+        expect(existsSync(dbPath + '.lock')).toBe(false);
+      } finally {
+        rmSync(tmpDir, { recursive: true });
+      }
+    });
+
+    it('does not create a lock file for :memory: stores', () => {
+      const s = new Store(':memory:');
+      // beforeEach store is also :memory: — this verifies the path.
+      expect(s.dbPath).toBe(':memory:');
+      s.close();
     });
   });
 

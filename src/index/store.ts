@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import type { AgentType, Chunk, JsonlAgentType } from '../types.js';
+import { Lock } from './lock.js';
 
 /** Embedding dimension for nomic-embed-text. One place to change if the model changes. */
 export const EMBED_DIMS = 768;
@@ -127,23 +128,52 @@ export class Store {
   private readonly txnBatch: (items: Array<{ chunk: Chunk }>) => number[];
   private readonly txnSetEmbedding: (id: number, embedding: number[]) => void;
 
+  /** Process-level lock on the index file. Released by {@link close}. */
+  private readonly lock: Lock | undefined;
+
   /**
    * Open (or create) the index database.
    *
+   * For file-backed stores, takes a process-level lock on `<dbPath>.lock` so
+   * two `sift` processes can't both write to the same DB (which would split
+   * the DB across two inodes and silently lose data). Stale locks held by a
+   * dead PID are taken over automatically.
+   *
+   * Read-only callers (`sift search`, `sift show`, `sift status`,
+   * `sift serve` without `--watch`) pass `readOnly: true` to skip the lock —
+   * SQLite's WAL mode lets multiple readers coexist, and the lock is only
+   * needed to keep two writers from racing or splitting the file.
+   *
    * @param dbPath  Explicit path, or `:memory:` for tests. Defaults to
    *                `$SIFT_DB` or `~/.sift/index.db`.
+   * @param readOnly  When true, skip the process lock. Use for any command
+   *                  that doesn't write to the index. Defaults to false.
    */
-  constructor(dbPath?: string) {
+  constructor(dbPath?: string, readOnly = false) {
     const resolved = resolveDbPath(dbPath);
 
     this.dbPath = resolved;
 
-    if (resolved !== ':memory:') {
+    const isMemory = resolved === ':memory:';
+    if (!isMemory) {
       mkdirSync(dirname(resolved), { recursive: true });
+      if (!readOnly) {
+        this.lock = new Lock(resolved);
+        this.lock.acquire();
+      }
     }
 
-    this.db = new Database(resolved);
-    sqliteVec.load(this.db);
+    try {
+      this.db = new Database(resolved);
+      sqliteVec.load(this.db);
+    } catch (err) {
+      // If the DB open fails (corrupt file, disk full, etc.) and we already
+      // took the lock, release it so the next process isn't blocked behind
+      // a dead process's lock. (Stale-PID recovery would also clean it up,
+      // but cleaning up here is faster and more obviously correct.)
+      this.lock?.release();
+      throw err;
+    }
 
     // WAL mode lets readers run concurrently with a single writer — the core
     // use case is searching while a backfill writes. Skip for :memory: because
@@ -717,6 +747,7 @@ export class Store {
 
   close(): void {
     this.db.close();
+    this.lock?.release();
   }
 }
 

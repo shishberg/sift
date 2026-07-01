@@ -23,6 +23,8 @@ import { OpencodePoller } from '../ingest/opencode-poller.js';
 import { search, type SearchResult } from '../search/search.js';
 import { startServer, DEFAULT_PORT } from '../server/server.js';
 import { OpenCodeSource, DEFAULT_OPENCODE_DB_PATH } from '../sources/opencode.js';
+import { gracefulShutdown } from './shutdown.js';
+import { LockHeldError } from '../index/lock.js';
 
 // ---------------------------------------------------------------------------
 // Help text
@@ -1025,7 +1027,7 @@ async function main(): Promise<void> {
       cwdFilter = process.cwd();
     }
 
-    const store = new Store();
+    const store = new Store(undefined, true);
     const embedder = createEmbedder();
 
     // Guard: if the index was built with a different model, the query embeddings
@@ -1089,7 +1091,7 @@ async function main(): Promise<void> {
       process.exit(1);
     }
 
-    const store = new Store();
+    const store = new Store(undefined, true);
     try {
       const color = (process.stdout.isTTY ?? false) && !process.env.NO_COLOR;
       cmdShow(
@@ -1105,7 +1107,7 @@ async function main(): Promise<void> {
 
   // ---- status ----
   if (parsed.command === 'status') {
-    const store = new Store();
+    const store = new Store(undefined, true);
     try {
       cmdStatus(
         { queueStats: () => store.queueStats() },
@@ -1124,9 +1126,9 @@ async function main(): Promise<void> {
       const deleted = deleteIndexFiles();
       console.log(`Deleted index at ${deleted}. Rebuilding from scratch (re-embeds everything)…`);
       // On Unix, unlinking the DB doesn't stop a separately-running watch/serve
-      // process that already has it open — that process keeps writing to the now
-      // orphaned file. Tell the user to stop those first.
-      console.log('Note: stop any running `sift watch` / `sift serve --watch` before reindexing.');
+      // The Store takes a process-level lock on index.db, so any running
+      // `sift watch` / `sift serve --watch` will block the reindex with a
+      // clear "Another process holds the lock" error. No need to warn here.
     }
 
     const store = new Store();
@@ -1177,7 +1179,7 @@ async function main(): Promise<void> {
       process.exit(1);
     }
 
-    const store = new Store();
+    const store = new Store(undefined, !parsed.watch);
     const embedder = createEmbedder();
 
     // Guard: the embed model must match the index (needed for both search queries
@@ -1260,16 +1262,34 @@ async function main(): Promise<void> {
     }
 
     // Graceful shutdown on SIGINT: close server, watcher, store.
+    // Bounded so a hung long-poll connection doesn't trap the process — without
+    // this, the user has to hit Ctrl-C twice and the lock file is left behind.
     process.once('SIGINT', () => {
       console.log('\nStopping…');
       void (async () => {
-        opencodePoller?.stop();
-        if (watcher) await watcher.stop();
-        await new Promise<void>((resolve, reject) =>
-          server.close((err) => (err ? reject(err) : resolve())),
-        );
-        store.close();
-        process.exit(0);
+        const result = await gracefulShutdown({
+          timeoutMs: 5000,
+          onTimeout: () => console.error('Graceful shutdown timed out; forcing exit.'),
+          onError: (err, name) => console.error(`Shutdown step "${name}" failed:`, err),
+          steps: [
+            { name: 'opencodePoller', run: () => opencodePoller?.stop() },
+            { name: 'watcher', run: async () => { if (watcher) await watcher.stop(); } },
+            {
+              name: 'httpServer',
+              run: () => new Promise<void>((resolve) => {
+                server.close(() => resolve());
+                // server.close() waits for in-flight connections (notably the
+                // /api/status long-poll, up to 30s). We let the overall
+                // gracefulShutdown deadline cancel us; this inner close
+                // can't be cancelled, but the parent timeout will return.
+              }),
+            },
+            { name: 'store', run: () => store.close() },
+          ],
+        });
+        if (result === 'success') process.exit(0);
+        if (result === 'fail') process.exit(1);
+        process.exit(130); // 128 + SIGINT — conventional for forced exit
       })();
     });
 
@@ -1295,11 +1315,21 @@ async function main(): Promise<void> {
       stopped = true;
       if (isTTY) process.stdout.write('\n');
       console.log('Stopping watcher…');
-      opencodePoller?.stop();
-      void watcher.stop().then(() => {
-        store.close();
-        process.exit(0);
-      });
+      void (async () => {
+        const result = await gracefulShutdown({
+          timeoutMs: 5000,
+          onTimeout: () => console.error('Graceful shutdown timed out; forcing exit.'),
+          onError: (err, name) => console.error(`Shutdown step "${name}" failed:`, err),
+          steps: [
+            { name: 'opencodePoller', run: () => opencodePoller?.stop() },
+            { name: 'watcher', run: () => watcher.stop() },
+            { name: 'store', run: () => store.close() },
+          ],
+        });
+        if (result === 'success') process.exit(0);
+        if (result === 'fail') process.exit(1);
+        process.exit(130);
+      })();
     });
 
     // Guard embed model before starting. watch retries on each kick, so a model
@@ -1355,7 +1385,11 @@ const isMain = (() => {
 })();
 if (isMain) {
   main().catch((err) => {
-    console.error('Fatal error:', err);
+    if (err instanceof LockHeldError) {
+      console.error(err.message);
+    } else {
+      console.error('Fatal error:', err);
+    }
     process.exit(1);
   });
 }
