@@ -1278,10 +1278,11 @@ async function main(): Promise<void> {
               name: 'httpServer',
               run: () => new Promise<void>((resolve) => {
                 server.close(() => resolve());
-                // server.close() waits for in-flight connections (notably the
-                // /api/status long-poll, up to 30s). We let the overall
-                // gracefulShutdown deadline cancel us; this inner close
-                // can't be cancelled, but the parent timeout will return.
+                // closeAllConnections() destroys in-flight sockets, including
+                // the /api/status long-poll, so close() resolves almost
+                // immediately instead of waiting up to 30s. The gracefulShutdown
+                // 5s deadline is still a backstop in case anything else hangs.
+                server.closeAllConnections();
               }),
             },
             { name: 'store', run: () => store.close() },
