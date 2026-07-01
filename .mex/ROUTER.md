@@ -22,7 +22,7 @@ edges:
     condition: when adding an agent or touching agent-specific parsing
 last_updated: 2026-07-01
 web_layout_updated: 2026-06-30
-recent_sessions_sql_updated: 2026-06-30
+recent_sessions_sql_updated: 2026-07-01
 embed_providers_updated: 2026-06-30
 compaction_render_updated: 2026-06-30
 index_lock_added: 2026-07-01
@@ -86,9 +86,11 @@ collapsed by default, styled like the tool block.
   the URL (`?q=…`) so back-nav restores it, plus a localStorage recent-search dropdown.
   With no query the sidebar lists the most recently touched sessions (distinct sessions ordered by
   most recent message; one row per session previewing that latest message) from `GET /api/recent`
-  (`store.recentSessions`: top-N sessions by `MAX(line_number)`, then each one's latest chunk,
-  served by the `chunks(session_id, line_number)` index — without it the cwd subquery made this a
-  ~60s scan). The `id ASC` tiebreak in the per-session latest-chunk subquery is load-bearing: the
+  (`store.recentSessions`: top-N sessions by `MAX(timestamp)` — NOT `line_number`, which is a
+  per-file offset that would float long opencode sessions above newer short claude/codex ones —
+  then each one's latest chunk, served by the `chunks(session_id, line_number, timestamp)` index
+  (trailing `timestamp` keeps the `MAX(timestamp)` a covering scan) — without it the cwd subquery
+  made this a ~60s scan). The `id ASC` tiebreak in the per-session latest-chunk subquery is load-bearing: the
   claude adapter emits two chunks at the same `lineNumber`+`timestamp` for an assistant message
   with both `text` and `tool_use` blocks, and the text block must surface as the "latest message"
   (not the tool).

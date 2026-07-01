@@ -435,6 +435,17 @@ describe('Store', () => {
       expect(rows.map((r) => r.sessionId)).toEqual(['s1', 's2']);
     });
 
+    it('orders by timestamp, not line_number (a long old session ranks below a short new one)', () => {
+      // Regression: line_number is a per-file offset, not a recency signal. A
+      // long session (e.g. opencode, thousands of lines) must NOT outrank a
+      // newer session that happens to have fewer lines.
+      store.addChunk(makeChunk({ sessionId: 'long-old', lineNumber: 9000, text: 'old but long', timestamp: '2026-01-01T00:00:01Z' }));
+      store.addChunk(makeChunk({ sessionId: 'short-new', lineNumber: 3, text: 'new but short', timestamp: '2026-01-01T00:00:09Z' }));
+
+      const rows = store.recentSessions();
+      expect(rows.map((r) => r.sessionId)).toEqual(['short-new', 'long-old']);
+    });
+
     it('uses the most recent message as the snippet and its locator', () => {
       store.addChunk(makeChunk({ sessionId: 's1', lineNumber: 1, text: 'old', timestamp: '2026-01-01T00:00:01Z' }));
       store.addChunk(makeChunk({ sessionId: 's1', lineNumber: 7, text: 'newest', timestamp: '2026-01-01T00:00:09Z' }));
