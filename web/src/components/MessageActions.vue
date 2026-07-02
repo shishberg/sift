@@ -80,7 +80,7 @@ async function onCopyId(): Promise<void> {
       type="button"
       class="msg-action"
       :class="{ 'is-copied': copied === 'id' }"
-      :title="copied === 'id' ? 'Copied' : idString"
+      :title="copied === 'id' ? 'Copied' : String(line)"
       aria-label="Copy message id"
       @click="onCopyId"
     >
