@@ -420,6 +420,76 @@ body {
   box-shadow: 0 0 0 1px var(--violet);
 }
 
+/* ── Message / block hover actions ─────────────────────────────────────── */
+/* Positioning context for the absolute overlay; no overflow clip so the actions
+   show even on narrow boxes. Does not affect the box it wraps. */
+.actions-host {
+  position: relative;
+}
+/* On messages the host hugs the w-fit bubble so the actions anchor to the
+   bubble's right edge (not the full-width row). */
+.msg-wrap {
+  display: block;
+  max-width: 100%;
+}
+/* Sits mostly above the box but dips ~8px over the top edge — into the box's top
+   padding, above the text. The overlap also keeps the hover continuous (no dead
+   gap to cross when moving the mouse from the box up onto the bar). */
+.msg-actions {
+  position: absolute;
+  bottom: calc(100% - 8px);
+  right: 0;
+  opacity: 0;
+  transition: opacity 0.12s;
+  /* Revealed on hover; floats up, so it never reflows or covers text. */
+  pointer-events: none;
+}
+.msg-actions-bar {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--white);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+/* Match the bubble colours so the bar reads as part of the box. */
+.is-user .msg-actions-bar {
+  background: var(--user-bg);
+  border-color: var(--user-border);
+}
+.is-assistant .msg-actions-bar {
+  background: var(--assistant-bg);
+  border-color: var(--assistant-border);
+}
+.actions-host:hover .msg-actions,
+.msg-actions:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+.msg-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted-fg);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.12s, color 0.12s;
+}
+.msg-action:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--fg);
+}
+.msg-action.is-copied {
+  color: var(--violet);
+}
+
 /* ── Scrollbar ──────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 6px;
