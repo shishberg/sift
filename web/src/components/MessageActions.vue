@@ -18,6 +18,9 @@ const route = useRoute();
 // The line to link/copy — mirror how search results locate a message (first line).
 const line = computed(() => props.lineNumbers[0] ?? 0);
 
+// The exact "sessionId:line" locator the id button copies.
+const idString = computed(() => `${props.sessionId}:${line.value}`);
+
 // A real router location so the anchor gets a genuine href: left-click navigates
 // (highlights the message), middle/cmd-click opens a new tab, right-click "copy
 // link" works. Carry q along so the sidebar keeps its results.
@@ -39,7 +42,7 @@ async function onCopyText(): Promise<void> {
   if (await copyText(props.text)) flash('text');
 }
 async function onCopyId(): Promise<void> {
-  if (await copyText(`${props.sessionId}:${line.value}`)) flash('id');
+  if (await copyText(idString.value)) flash('id');
 }
 </script>
 
@@ -77,7 +80,7 @@ async function onCopyId(): Promise<void> {
       type="button"
       class="msg-action"
       :class="{ 'is-copied': copied === 'id' }"
-      :title="copied === 'id' ? 'Copied' : 'Copy id (sessionId:line)'"
+      :title="copied === 'id' ? 'Copied' : idString"
       aria-label="Copy message id"
       @click="onCopyId"
     >
